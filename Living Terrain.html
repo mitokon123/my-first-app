@@ -1,0 +1,1361 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Living Terrain vβ.5</title>
+<style>
+:root{--soil:#17140F;--panel:#221D16;--panel2:#2C251B;--line:#3E362B;
+ --ink:#E8E0CE;--dim:#A2937A;--faint:#6B6052;--moss:#7FB04A;--ember:#E0722C;--stone:#8A939C;--blood:#C4483C;}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--soil);color:var(--ink);
+ font-family:system-ui,-apple-system,"Hiragino Sans","Yu Gothic UI","Noto Sans JP",sans-serif}
+.num{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
+#wrap{max-width:720px;margin:0 auto;padding:14px 12px 48px}
+header{display:flex;align-items:baseline;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+h1{margin:0;font-size:19px;font-weight:600;letter-spacing:.22em;text-transform:uppercase}
+h1 span{color:var(--moss)}
+.tag{font-size:11px;color:var(--faint);letter-spacing:.14em}
+#hud{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.stat{background:var(--panel);border:1px solid var(--line);padding:5px 9px;flex:1;min-width:64px}
+.stat b{display:block;font-size:9px;color:var(--faint);letter-spacing:.16em;font-weight:500;margin-bottom:2px}
+.stat i{font-style:normal;font-size:15px}
+.rack{margin-top:14px}
+.rack>b{display:block;font-size:9px;color:var(--faint);letter-spacing:.18em;margin-bottom:6px}
+.row{display:flex;gap:6px;flex-wrap:wrap}
+button{font:inherit;color:var(--ink);background:var(--panel);border:1px solid var(--line);cursor:pointer;padding:0;text-align:left}
+button:disabled{opacity:.34;cursor:not-allowed}
+button:focus-visible{outline:2px solid var(--moss);outline-offset:1px}
+
+/* --- region map --- */
+#regions{display:flex;flex-direction:column;gap:6px}
+.node{display:flex;gap:10px;align-items:flex-start;padding:9px 11px;border:1px solid var(--line);background:var(--panel);width:100%}
+.node .k{width:26px;flex:none;text-align:center;color:var(--faint);font-size:11px;padding-top:2px}
+.node .m{flex:1;min-width:0}
+.node em{font-style:normal;font-size:13px;display:block}
+.node s{text-decoration:none;display:block;font-size:11px;color:var(--faint);line-height:1.6}
+.node.done{border-color:#4C6B32}
+.node.done .k{color:var(--moss)}
+.node.lock em{color:var(--faint)}
+.node.on{border-color:var(--moss);background:var(--panel2)}
+.node.on .k{color:var(--moss)}
+
+/* --- roster --- */
+#roster{display:flex;gap:5px;flex-wrap:wrap}
+.ind{display:flex;align-items:center;gap:6px;padding:5px 8px 5px 5px;min-width:150px;flex:1 1 150px;position:relative}
+.ind canvas{width:26px;height:26px;flex:none}
+.ind u{text-decoration:none;display:block;flex:1;min-width:0}
+.ind em{font-style:normal;display:block;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ind s{text-decoration:none;display:block;font-size:10px;color:var(--faint)}
+.ind.on{border-color:var(--moss);background:var(--panel2)}
+.ind.bad{opacity:.5}
+.ind .w{position:absolute;top:3px;right:5px;font-size:9px;color:var(--faint)}
+.hpb{height:3px;background:#000;margin-top:3px}
+.hpb i{display:block;height:3px;background:var(--moss)}
+.filt{padding:5px 10px;font-size:11px;color:var(--dim)}
+.filt.on{border-color:var(--moss);color:var(--ink)}
+
+/* --- detail --- */
+#detail{background:var(--panel);border:1px solid var(--line);padding:10px 12px;font-size:12px;line-height:1.7}
+#detail h4{margin:0 0 6px;font-size:13px;font-weight:600}
+#detail .met{display:flex;align-items:center;gap:8px;margin:3px 0}
+#detail .met u{text-decoration:none;width:56px;color:var(--faint);font-size:11px;flex:none}
+#detail .bar{flex:1;height:6px;background:#000;position:relative}
+#detail .bar i{display:block;height:6px}
+#detail .mark{position:absolute;top:-2px;width:1px;height:10px;background:var(--dim)}
+#detail .val{width:70px;text-align:right;color:var(--dim);font-size:11px;flex:none;font-family:ui-monospace,monospace}
+#detail hr{border:none;border-top:1px solid var(--line);margin:9px 0}
+#detail button{padding:6px 12px;font-size:12px;margin:4px 6px 0 0}
+#detail button.ev:enabled{background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600}
+#detail button.rel{color:var(--blood);border-color:#5A2E28}
+
+/* --- stage --- */
+#stage{position:relative;border:1px solid var(--line);background:#0F0D0A;line-height:0}
+canvas#cv{width:100%;height:auto;image-rendering:pixelated;display:block;touch-action:manipulation}
+#msg{position:absolute;inset:0;display:none;align-items:center;justify-content:center;
+ background:rgba(15,13,10,.9);flex-direction:column;gap:14px;text-align:center;line-height:1.6}
+#msg.on{display:flex}
+#msg h2{margin:0;font-size:23px;letter-spacing:.1em;font-weight:500}
+#msg p{margin:0;color:var(--dim);font-size:13px;max-width:400px;padding:0 20px}
+#msg button{background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600;padding:10px 20px;font-size:13px}
+#ticker{background:var(--panel);border:1px solid var(--line);border-top:none;padding:7px 10px;font-size:12px;color:var(--dim);min-height:34px;line-height:1.5}
+#ticker b{color:var(--ink);font-weight:500}
+#ticker em{font-style:normal;color:var(--moss)}
+.act{padding:8px 10px;font-size:12px;flex:1;min-width:80px;text-align:center}
+.act.sel{border-color:var(--moss);background:var(--panel2)}
+.act s{text-decoration:none;color:var(--faint);font-size:10px;display:block;margin-top:2px}
+#go{background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600;padding:10px 16px;font-size:13px;text-align:center;letter-spacing:.06em}
+#go:disabled{background:var(--panel);color:var(--faint);border-color:var(--line);font-weight:400}
+.ghost{padding:10px 14px;font-size:12px;color:var(--dim);text-align:center}
+.dex{display:flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);padding:5px 9px;font-size:11px}
+.dex canvas{width:22px;height:22px}
+.dex.got{border-color:var(--moss)}
+.dex span{color:var(--faint)}
+.dex.got span{color:var(--ink)}
+.ghost2{padding:8px 14px;font-size:12px;color:var(--dim);text-align:center}
+#scr-title{padding:26px 6px 20px;text-align:center}
+#title-art{max-width:520px;margin:0 auto 20px}
+#title-lede{color:var(--dim);font-size:13px;line-height:2;margin:0 auto 26px;max-width:520px}
+#title-btns{display:flex;flex-direction:column;gap:8px;max-width:300px;margin:0 auto}
+#title-btns button{padding:12px 16px;font-size:13px;text-align:center;letter-spacing:.05em}
+#t-new{background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600}
+#title-foot{margin-top:28px;color:var(--faint);font-size:11px;letter-spacing:.16em}
+#ver-badge{position:absolute;top:12px;left:14px;font-size:11px;color:var(--moss);
+ letter-spacing:.16em;font-family:ui-monospace,monospace;border:1px solid var(--line);padding:3px 8px}
+#scr-title{position:relative}
+#patchnotes{max-width:520px;margin:18px auto 0;text-align:left;border:1px solid var(--line);background:var(--panel)}
+#patchnotes summary{padding:9px 12px;font-size:12px;color:var(--dim);cursor:pointer}
+#patchnotes .pn{padding:0 14px 12px}
+#patchnotes .pn-v{color:var(--moss);font-size:11px;letter-spacing:.14em;font-family:ui-monospace,monospace;margin:10px 0 4px}
+#patchnotes ul{margin:0;padding-left:18px}
+#patchnotes li{color:var(--dim);font-size:12px;line-height:1.7;margin:2px 0}
+#modal{position:fixed;inset:0;background:rgba(10,9,6,.82);display:none;align-items:center;justify-content:center;z-index:20;padding:20px}
+#modal.on{display:flex}
+#modal .sheet{background:var(--panel);border:1px solid var(--line);padding:16px 18px;max-width:520px;width:100%}
+#modal h3{margin:0 0 8px;font-size:15px;font-weight:600}
+#modal textarea{width:100%;height:120px;margin-top:10px;background:#0F0D0A;color:var(--ink);
+ border:1px solid var(--line);padding:8px;font-family:ui-monospace,monospace;font-size:11px;resize:vertical}
+#modal button{padding:8px 16px;font-size:12px;text-align:center}
+#modal-ok{background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600}
+details{margin-top:16px;border:1px solid var(--line);background:var(--panel)}
+summary{padding:9px 12px;font-size:12px;cursor:pointer;color:var(--dim)}
+details p{margin:0;padding:0 12px 12px;font-size:12px;line-height:1.85;color:var(--dim)}
+details p b{color:var(--ink);font-weight:500}
+.note{font-size:11px;color:var(--faint);line-height:1.7;margin-top:6px}
+</style>
+
+<div id="wrap">
+<header><h1>Living <span>Terrain</span></h1><div class="tag" id="subtitle" style="cursor:pointer" title="タイトルへ">vβ.5</div></header>
+<div id="hud"></div>
+
+<!-- ============ TITLE ============ -->
+<div id="scr-title">
+  <div id="ver-badge">vβ.5</div>
+  <div id="title-art"></div>
+  <p id="title-lede">痩せた大陸の、最後の巣。あなたは名を失った古い主（ヌシ）。<br>
+  襲ってくる渡りは、棲む場所を失った群れだ。<br>
+  倒すことは答えにならない。彼らの棲む地形を育て、迎え入れること——<br>
+  それだけが、この相をもう一度生かす。</p>
+  <div id="title-btns">
+    <button id="t-new">新しい相を始める</button>
+    <button id="t-continue" style="display:none">続きから</button>
+    <button id="t-load">セーブ文字列から復元</button>
+  </div>
+  <div id="title-foot">LIVING TERRAIN　地形が育つタワーディフェンス</div>
+  <details id="patchnotes"><summary>パッチノート</summary>
+    <div class="pn">
+      <div class="pn-v">vβ.5</div>
+      <ul>
+        <li><b>攻撃硬直</b>を追加。撃った直後 0.3 秒はその場から動けない。味方も渡りも同じ。</li>
+        <li>これにより「撃ちながら下がる」がほぼ成立しなくなった。遠距離は<em>敵を射程の内側に入れない配置</em>そのものが仕事になる。</li>
+        <li>硬直中は足元に橙色の短い線が出る。</li>
+      </ul>
+      <div class="pn-v">vβ.4</div>
+      <ul>
+        <li>渡りが、射程の内側に見える群れへ<b>寄り道</b>するようになった。素通りせず、殴れる位置まで近づいてくる。</li>
+        <li>ただし長く食い下がりはしない。4 秒ほど粘って届かなければ諦め、しばらくは巣へまっすぐ向かう。壁で永久に足止めはできない。</li>
+        <li>主（ヌシ）は寄り道しない。巣だけを見て進む。</li>
+        <li>ハシリムシとコウラガメの攻撃射程をわずかに拡大（30→34、20→32）。密着しないと殴れない状態を解消。</li>
+      </ul>
+      <div class="pn-v">vβ.3</div>
+      <ul>
+        <li>射程が正しく働いていなかった不具合を修正。索敵範囲に射程の半分しか加算されておらず、遠距離ほど本来の射程より手前でしか撃てなかった（オオヒノメは 80px 分、ヒノメは 65px 分を損していた）。</li>
+        <li>攻撃判定が移動前の位置で行われていたため、射程ぎりぎりの敵にいつまでも当たらない不具合を修正。</li>
+        <li>射程外の敵には、なわばりの範囲内で近づくようになった。遠距離個体が近すぎる敵から退いたあと沈黙する挙動も解消。</li>
+      </ul>
+      <div class="pn-v">vβ.2</div>
+      <ul>
+        <li>タイトルの「新しい相を始める」と「放逐」が動かない不具合を修正。確認表示をゲーム内のものに統一した。</li>
+        <li>全個体・全敵のステータスを一斉調整。</li>
+        <li>ヒノメが焦土を広げなくなった。焦土は「焼却」で作る——主の介入がその分だけ重要になる。</li>
+        <li>コウラガメを迎える肉を 75 → 50 に。岩場の守りを早く揃えられる。</li>
+        <li>主（イワオヤ・ソウノヌシ）の体力を大幅に引き下げ。6 体の編成でも屈服まで押し切れる。</li>
+        <li>渡り全般の体力と攻撃を下方修正。コウラガメの射程も短く。</li>
+      </ul>
+      <div class="pn-v">vβ.1</div>
+      <ul>
+        <li>適性地形の上に個体を出すと、必要な魂が約半分に。地形を先に育てる意味を強めた。</li>
+        <li>渡りを倒したときの魂を全体的に減少（ハシリムシなど序盤の敵は特に少なく）。</li>
+        <li>地形を育てて得る魂を引き下げ。</li>
+        <li>統率を廃止。連れて行けるのは一律 6 体に。</li>
+        <li>戦闘画面からの「撤退して巣へ戻る」が機能しなかった不具合を修正。</li>
+        <li>タイトルにバージョン表記とこのパッチノートを追加。</li>
+      </ul>
+      <div class="pn-v">vβ</div>
+      <ul>
+        <li>タイトル画面と導入を追加。セーブ（自動保存＋文字列書き出し）に対応。</li>
+        <li>巣の肉と戦場の魂を別資源に分離。</li>
+      </ul>
+      <div class="pn-v">β1–β5</div>
+      <ul>
+        <li>生きて広がる地形、なわばりと移住、3種の捕獲（生態誘導・寄生・屈服）、順応と進化、傷跡、6つの相を実装。</li>
+      </ul>
+    </div>
+  </details>
+</div>
+
+<!-- ============ NEST ============ -->
+<div id="scr-nest">
+  <div id="firsthint" class="rack" style="display:none">
+    <div style="border:1px solid #4C6B32;background:#1E2416;padding:10px 12px;font-size:12px;line-height:1.8;color:var(--dim)">
+    <b style="color:var(--ink)">はじめに</b>　①「相」から<b style="color:var(--ink)">浅瀬の相</b>を押す　②<b style="color:var(--ink)">名簿</b>の個体を押して編成に入れる　③<b style="color:var(--ink)">出撃</b>。<br>
+    戦場では、連れてきた個体を押してから盤面のマスを押すと出せる（<b style="color:var(--ink)">魂</b>を消費。渡りを倒す・地形を育てると溜まる）。ヌマトカゲの周りは沼地に変わり、渡りを遅くする。体力が三割を切った渡りが好む地形の上にいると、棲みついて仲間になる。
+    </div>
+  </div>
+  <div class="rack"><b>相 — 行き先を選ぶ</b><div id="regions"></div></div>
+
+  <div class="rack"><b id="party-h">編成</b>
+    <div class="row" id="party"></div>
+    <div class="note" id="party-note"></div>
+    <div class="row" style="margin-top:8px"><button id="sortie" style="background:var(--moss);color:#12200A;border-color:var(--moss);font-weight:600;padding:10px 18px;font-size:13px;text-align:center">出撃</button></div>
+  </div>
+
+  <div class="rack"><b>名簿</b>
+    <div class="row" id="filters" style="margin-bottom:6px"></div>
+    <div id="roster"></div>
+  </div>
+
+  <div class="rack" id="dtrack" style="display:none"><b>個体</b><div id="detail"></div></div>
+
+  <div class="rack"><b>系統の解放 — 核と引き換えに新しい血を招く</b><div class="row" id="lines"></div></div>
+  <div class="rack"><b>迎える</b><div class="row" id="hire"></div></div>
+  <div class="rack"><b>記録</b>
+    <div class="row">
+      <button id="n-save" class="ghost2">セーブ</button>
+      <button id="n-title" class="ghost2">タイトルへ戻る</button>
+    </div>
+    <div class="note">ローカルに保存したHTMLでは自動保存が効く。プレビュー環境では「セーブ」で文字列を書き出し、次回タイトルの「復元」で貼り戻す。</div>
+  </div>
+  <div class="rack"><b>図鑑</b><div class="row" id="codex"></div></div>
+</div>
+
+<div id="modal"><div class="sheet">
+  <h3 id="modal-t">セーブ</h3>
+  <p id="modal-d" class="note"></p>
+  <textarea id="modal-x" spellcheck="false"></textarea>
+  <div class="row" style="margin-top:8px">
+    <button id="modal-ok"></button>
+    <button id="modal-cancel" class="ghost2">閉じる</button>
+  </div>
+</div></div>
+
+<!-- ============ STAGE ============ -->
+<div id="scr-stage" style="display:none">
+  <div id="stage">
+    <canvas id="cv" width="660" height="440"></canvas>
+    <div id="msg"><h2 id="msg-t"></h2><p id="msg-b"></p><button id="msg-b2">巣へ戻る</button></div>
+  </div>
+  <div id="ticker"></div>
+  <div class="rack"><b>連れてきた個体</b><div class="row" id="dock"></div></div>
+  <div class="rack"><b>主の権能</b><div class="row" id="acts"></div></div>
+  <div class="rack"><div class="row">
+    <button id="go">最初の渡りを迎える</button>
+    <button id="retreat" class="ghost">撤退して巣へ戻る</button>
+  </div></div>
+</div>
+
+<details>
+<summary>遊び方</summary>
+<p>
+<b>編成。</b>ステージに連れて行けるのは 6 体まで。（今後、枠を 2 つ・3 つ占める大型の個体を追加予定。）<br>
+<b>攻撃硬直。</b>撃った直後はしばらく動けない。撃ちながら下がることはできないので、遠距離の個体は<em>敵を射程の内側に入れないこと</em>自体が仕事になる。<br>
+<b>射程となわばり。</b>個体は<em>なわばりの中を動いて</em>敵を迎え撃つ。だから実際に届く範囲は「なわばり半径＋射程」になる。遠距離の個体は敵が近づきすぎると退き、射程の外にいる敵には、なわばりが許すぶんだけ近づく。<br>
+<b>疲労。</b>出撃した個体は疲れる。疲労3では編成に入れられない。留守番させると回復する。<b>同じ主力を連れ回すことはできない。</b><br>
+<b>重傷。</b>ステージ中に倒れた個体はその戦いには戻らず、以後2つのステージを休養する。<br>
+<b>肉と魂は別。</b>巣の<b>肉</b>は個体を迎えるためのメタ資源。戦場では使わない。戦場で個体を出すのに要るのは<b>魂</b>で、これはその戦い限り。少なく始まり、<em>渡りを倒す・地形を育てる</em>と溜まる。だから序盤に地形を広げておくほど、中盤に多くの個体を出せる。倒した渡りからは肉も出て、勝てば巣に持ち帰る。<br>
+<b>放逐。</b>個体を手放すと肉になる。名簿が膨れたら整理する。<br>
+<b>順応と進化。</b>出撃中、立っている地形の適応値が溜まる。45で適性になる。適応値と戦績が揃うと進化の分岐が開く。<br>
+<b>捕獲＝救済。</b>体力が三割を切った渡りが好む地形の上にいると、そこに棲みつき仲間になる。核も得られる。核は新しい相を開くのに要る。<br>
+<b>主（ヌシ）は倒せない。</b>体力を削り切っても死なず、膝をつく。屈服しているあいだ捕獲が進むが、護衛が押し寄せ、抑えきれなければ立ち上がって荒れ狂う。二度目からは屈服の時間が短くなる。<br>
+<b>寄生。</b>ヤドリムシの寄生体が体力45%以下の渡りに当たると、その場で味方に変わり、<em>すぐ戦力になる</em>。波を生き延びれば群れに加わる。地形を整える必要がない唯一の捕獲だが、弱らせる手間は要る。<br>
+<b>主は地形を書き換えながら歩く。</b>イワオヤは通った跡を岩場に変え、道そのものを作り替える。<br>
+<b>コウラガメは岩場を越える。</b>灰色の点線がその進路。岩場は万能の壁ではない。
+</p>
+</details>
+</div>
+
+<script>
+"use strict";
+/* ================= constants ================= */
+const COLS=15,ROWS=10,CELL=44,W=COLS*CELL,H=ROWS*CELL;
+const BARREN=0,MIRE=1,EMBER=2,ROCK=3;
+const ADAPT_AFF=45, FATIGUE_MAX=3, WOUND_REST=2, FATIGUE_REC=3;
+// 攻撃硬直：撃った直後この秒数だけ動けない（味方・渡り共通）
+const ATTACK_ROOT=0.30;
+const TERRAIN={
+ 0:{name:"素地",base:"#5C5344",spec:"#6B6152",dark:"#4A4235"},
+ 1:{name:"沼地",base:"#31584A",spec:"#3E6B58",dark:"#26463B"},
+ 2:{name:"焦土",base:"#6B3120",spec:"#8A3F25",dark:"#4E2416"},
+ 3:{name:"岩場",base:"#565C64",spec:"#69707A",dark:"#41464D"}};
+const CH={".":BARREN,"m":MIRE,"e":EMBER,"r":ROCK};
+
+/* ================= sprites ================= */
+const SPR={};
+function mk(pal,rows){
+ const n=rows.length,m=rows[0].length,s=4;
+ const cv=document.createElement("canvas");cv.width=m*s;cv.height=n*s;
+ const g=cv.getContext("2d");
+ for(let y=0;y<n;y++)for(let x=0;x<m;x++){const ch=rows[y][x];if(ch==="."||!pal[ch])continue;
+  g.fillStyle=pal[ch];g.fillRect(x*s,y*s,s,s);}
+ return cv;}
+SPR.numa=mk({a:"#24503A",b:"#4C8B5A",c:"#12180F",d:"#8FBF5A"},["..........","...dbbd...","..abbbba..",".abbccbba.",".abbbbbba.","aabbbbbbaa",".abbbbbba.","a.a.bb.a.a","....aa....",".....a...."]);
+SPR.hino=mk({a:"#C4501A",b:"#F0913A",c:"#FCDD86",d:"#2B0F04"},["....cc....","...cbbc...","..cbaabc..","..baddab..",".cbadddab.",".cbaddaab.","..cbaabc..","...cbbc...","....aa....",".....a...."]);
+SPR.iwa=mk({a:"#3E444B",b:"#79818A",c:"#1A1D22",d:"#9FA8B2"},["..........","..addda...",".abbbbbba.",".abcbbcba.","aabbbbbbaa","aabbbbbbaa",".abbbbbba.","..aaaaaa..","..a....a..",".a......a."]);
+SPR.hashi=mk({a:"#6E7A22",b:"#B8C24A",c:"#151808",d:"#E0E88A"},["..........","....dd....","...bccb...","a..bbbb..a",".a.bbbb.a.","a..bbbb..a",".a.abba.a.","...a..a...","....aa....",".........."]);
+SPR.koura=mk({a:"#2E2118",b:"#6B4A32",c:"#9C7448",d:"#0E0906"},["..........","...aaaa...","..abbbba..",".abccccba.","abccccccba","abccccccba",".abccccba.","..aabbaa..",".a.a..a.a.","...dd....."]);
+SPR.homura=mk({a:"#8E2A55",b:"#C2417A",c:"#F0813C",d:"#2A1020"},["..........",".b......b.",".bbc..cbb.","abbccccbba",".abcddcba.","abbccccbba",".bbc..cbb.",".b......b.","....dd....",".........."]);
+SPR.doro=mk({a:"#1C4030",b:"#3E7A52",c:"#0B1108",d:"#A8D46A"},["..........","..d.dd.d..","..abbbba..",".abbccbba.","abbbbbbbba","abbbbbbbba","abbbbbbbba",".a.abba.a.","..a.aa.a..",".........."]);
+SPR.yake=mk({a:"#7A3A18",b:"#C4501A",c:"#12180F",d:"#F0913A",e:"#4C8B5A"},["..........","...dbbd...","..abbbba..",".abbccbba.",".aebbbbea.","aabbbbbbaa",".aebbbbea.","a.a.bb.a.a","....dd....",".....d...."]);
+SPR.oohino=mk({a:"#C4501A",b:"#F0913A",c:"#FCDD86",d:"#2B0F04"},["..c.cc.c..","..cbbbbc..",".cbaaaabc.",".cbadddab.","cbaddddabc","cbaddddabc",".cbadddab.","..cbaabc..","...cbbc...","....aa...."]);
+SPR.iwabi=mk({a:"#C4501A",b:"#F0913A",c:"#79818A",d:"#2B0F04"},["..........","..cccccc..",".cbaaaabc.",".cbadddab.","ccbaddabcc","ccbaddabcc",".cbaaaabc.","..cccccc..","..c....c..",".........."]);
+SPR.iwaou=mk({a:"#2E343A",b:"#79818A",c:"#1A1D22",d:"#C9D2DC"},["..d.dd.d..","..aaaaaa..",".abbbbbba.","abbcbbcbba","abbbbbbbba","abbbbbbbba",".abbbbbba.","..aaaaaa..","..a.aa.a..",".a......a."]);
+SPR.numagou=mk({a:"#3E444B",b:"#79818A",c:"#4C8B5A",d:"#8FBF5A",e:"#1A1D22"},["..........","..acccca..",".abbbbbba.",".abebbeba.","aabbbbbbaa","aacbbbbcaa",".abbbbbba.","..aaaaaa..","..a....a..",".d.d..d.d."]);
+SPR.mure=mk({a:"#6E7A22",b:"#B8C24A",c:"#151808",d:"#E0E88A"},["....dd....","...bccb...","a.abbbba.a",".a.bbbb.a.","a.abbbba.a",".a.bbbb.a.","a.aabbaa.a","...a..a...","....aa....",".........."]);
+SPR.gomori=mk({a:"#2E2118",b:"#6B4A32",c:"#9C7448",d:"#79818A"},["..d.dd.d..","..daaaad..",".abbbbbba.","abccccccba","abccccccba","abccccccba",".abccccba.","..aabbaa..",".a.a..a.a.",".........."]);
+SPR.hane=mk({a:"#8E2A55",b:"#C2417A",c:"#F0813C",d:"#2A1020"},[".b......b.",".bbc..cbb.","abbccccbba","abcddddcba","abcddddcba","abbccccbba",".bbc..cbb.",".b......b.","....dd....",".........."]);
+
+SPR.yadori=mk({a:"#4A6B2A",b:"#8FBF5A",c:"#1A2410",d:"#D8E8A0"},[
+"..........","....dd....","...dbbd...","..dbccbd..",".abbbbbba.","a.abbbba.a",".a.abba.a.","a..a..a..a","...a..a...",".........."]);
+SPR.iwaoya=mk({a:"#232A31",b:"#6B747E",c:"#0E1114",d:"#C9D2DC",e:"#3E444B"},[
+".d.d..d.d.","..aaaaaa..",".abbbbbba.","abbcbbcbba","abebbbbeba","abbbbbbbba","abbbbbbbba",".abbbbbba.","..aaaaaa..",".a.a..a.a."]);
+SPR.sounushi=mk({a:"#7A1E2E",b:"#D4562A",c:"#F7C24A",d:"#1A0A08",e:"#FCE9A8"},[
+"..e.cc.e..",".ecbbbbce.","ecbaaaabce","cbadddddbc","cbaddddabc","cbaddddabc","ecbadddabc",".ecbaabce.","..ecbbce..","...e..e..."]);
+
+/* ================= data ================= */
+const UNITS={
+ numa  :{spr:"numa"  ,name:"ヌマトカゲ",tag:"沼を広げる近接",cost:60,hp:120,dmg:12,rate:1.00,rng:60 ,terra:MIRE ,tspd:1.0,aff:MIRE ,terr:2.1,proj:null},
+ hino  :{spr:"hino"  ,name:"ヒノメ"    ,tag:"焔を灼く遠隔",cost:80,hp:77 ,dmg:14,rate:1.23,rng:130,terra:null ,tspd:0  ,aff:EMBER,terr:1.2,proj:"#F0913A"},
+ iwa   :{spr:"iwa"   ,name:"イワゴウ"  ,tag:"岩場で伸びる重撃",cost:75,hp:240,dmg:20,rate:1.50,rng:45 ,terra:null ,tspd:0  ,aff:ROCK ,terr:1.2,proj:null},
+ hashi :{spr:"hashi" ,name:"ハシリムシ",tag:"手数で削る",cost:45,hp:62 ,dmg:4 ,rate:.42,rng:55 ,terra:null ,tspd:0  ,aff:MIRE ,terr:1.8,proj:null},
+ koura :{spr:"koura" ,name:"コウラガメ",tag:"岩場の守り手",cost:50,hp:210,dmg:14,rate:1.45,rng:50 ,terra:null ,tspd:0  ,aff:ROCK ,terr:1.1,proj:null},
+ homura:{spr:"homura",name:"ホムラチョウ",tag:"焔をまとう長射程",cost:55,hp:78,dmg:11,rate:1.32,rng:110,terra:EMBER,tspd:.50,aff:EMBER,terr:1.8,proj:"#C2417A"},
+ yadori :{spr:"yadori" ,name:"ヤドリムシ",tag:"弱った渡りを乗っ取る",cost:90,hp:87,dmg:5,rate:1.40,rng:88,terra:null,tspd:0,aff:MIRE,terr:1.9,proj:"#A8D46A",para:1},
+ doro   :{spr:"doro"   ,name:"ドロヌシ"  ,tag:"沼を統べる",evo:1,cost:0,hp:200,dmg:17,rate:1.00,rng:60 ,terra:MIRE ,tspd:2.2,aff:MIRE ,terr:2.9,proj:null},
+ yake   :{spr:"yake"   ,name:"ヤケトカゲ",tag:"焔を纏う牙",evo:1,cost:0,hp:144,dmg:21,rate:1.05,rng:55 ,terra:null ,tspd:0  ,aff:EMBER,terr:2.0,proj:null},
+ oohino :{spr:"oohino" ,name:"オオヒノメ",tag:"遠く灼く",evo:1,cost:0,hp:120,dmg:19,rate:1.13,rng:160,terra:null ,tspd:0  ,aff:EMBER,terr:2.2,proj:"#FCDD86"},
+ iwabi  :{spr:"iwabi"  ,name:"イワビ"    ,tag:"焼け残った守り",evo:1,cost:0,hp:210,dmg:15,rate:1.03,rng:99 ,terra:EMBER,tspd:.30,aff:ROCK ,terr:1.5,proj:"#F0913A"},
+ iwaou  :{spr:"iwaou"  ,name:"イワオウ"  ,tag:"岩を生む王",evo:1,cost:0,hp:340,dmg:27,rate:1.50,rng:55 ,terra:ROCK ,tspd:.30,aff:ROCK ,terr:1.5,proj:null},
+ numagou:{spr:"numagou",name:"ヌマゴウ"  ,tag:"沼に沈む岩",evo:1,cost:0,hp:270,dmg:23,rate:1.30,rng:55 ,terra:MIRE ,tspd:.75,aff:MIRE ,terr:1.7,proj:null},
+ mure   :{spr:"mure"   ,name:"ムレバシリ",tag:"群れて削る",evo:1,cost:0,hp:88 ,dmg:7 ,rate:.42,rng:54 ,terra:MIRE ,tspd:.70,aff:MIRE ,terr:2.8,proj:null},
+ gomori :{spr:"gomori" ,name:"イワゴモリ",tag:"岩を広げる盾",evo:1,cost:0,hp:370,dmg:20,rate:1.30,rng:52 ,terra:null ,tspd:0  ,aff:ROCK ,terr:1.3,proj:null},
+ hane   :{spr:"hane"   ,name:"ヒノハネ"  ,tag:"翔ける灼熱",evo:1,cost:0,hp:105,dmg:15,rate:1.12,rng:122,terra:EMBER,tspd:.90,aff:EMBER,terr:2.1,proj:"#F0813C"},
+ iwaoya :{spr:"iwaoya" ,name:"イワオヤ"  ,tag:"岩を生む主",nushi:1,cost:0,hp:580,dmg:30,rate:1.40,rng:72 ,terra:ROCK ,tspd:2.0,aff:ROCK ,terr:2.0,proj:null},
+ sounushi:{spr:"sounushi",name:"ソウノヌシ",tag:"相を灼く主",nushi:1,cost:0,hp:380,dmg:32,rate:1.22,rng:122,terra:EMBER,tspd:2.0,aff:EMBER,terr:2.4,proj:"#F7C24A"}};
+const LINES=[{key:"yadori",cost:6,name:"ヤドリムシの系統",desc:"寄生体を撃ち込み、弱った渡りをその場で味方に変える。乗っ取った個体は波の終わりまで戦い、生き延びれば群れに加わる。"}];
+const EVO={
+ numa  :[{to:"doro"   ,ter:MIRE ,tn:90,st:"dmg"  ,sn:900},{to:"yake"   ,ter:EMBER,tn:80,st:"kills",sn:16}],
+ hino  :[{to:"oohino" ,ter:EMBER,tn:90,st:"dmg"  ,sn:1100},{to:"iwabi" ,ter:ROCK ,tn:60,st:"taken",sn:150}],
+ iwa   :[{to:"iwaou"  ,ter:ROCK ,tn:80,st:"taken",sn:260},{to:"numagou",ter:MIRE ,tn:80,st:"kills",sn:18}],
+ hashi :[{to:"mure"   ,ter:MIRE ,tn:70,st:"kills",sn:20}],
+ koura :[{to:"gomori" ,ter:ROCK ,tn:70,st:"taken",sn:200}],
+ homura:[{to:"hane"   ,ter:EMBER,tn:70,st:"dmg"  ,sn:800}]};
+const STATLBL={dmg:"与えた傷",kills:"倒した数",taken:"負った傷"};
+const SCARS={
+ burn :{name:"焼傷痕",note:"焦土でも強化／手数 −12%",dmg:1,rate:1.12,hp:1,rng:1,extraAff:EMBER},
+ mire :{name:"泥濘痕",note:"最大体力 +25%／射程 −12%",dmg:1,rate:1,hp:1.25,rng:.88,extraAff:null},
+ chip :{name:"欠け牙",note:"攻撃 −15%／手数 +28%",dmg:.85,rate:.72,hp:1,rng:1,extraAff:null},
+ stone:{name:"石化痕",note:"最大体力 +40%／手数 −20%",dmg:1,rate:1.20,hp:1.40,rng:1,extraAff:ROCK}};
+const FOES={
+ hashi :{spr:"hashi" ,name:"ハシリムシ",hp:27 ,spd:41,leak:1,meat:8 ,soul:1,likes:MIRE ,fly:false,atk:{dmg:3,rate:.95,rng:34,stop:false,proj:null}},
+ koura :{spr:"koura" ,name:"コウラガメ",hp:67 ,spd:20,leak:2,meat:17,soul:3,likes:ROCK ,fly:false,climbs:true,atk:{dmg:8,rate:1.5,rng:32,stop:true,proj:null}},
+ homura:{spr:"homura",name:"ホムラチョウ",hp:42,spd:37,leak:2,meat:14,soul:3,likes:EMBER,fly:true ,atk:{dmg:5,rate:1.3,rng:90,stop:false,proj:"#F0813C"}},
+ iwaoya:{spr:"iwaoya",name:"イワオヤ",hp:800,spd:13,leak:8,meat:120,likes:ROCK,fly:false,climbs:true,nushi:1,kneel:9,terra:ROCK,tspd:.55,guard:"koura",atk:{dmg:26,rate:2.0,rng:60,stop:true,proj:null}},
+ sounushi:{spr:"sounushi",name:"ソウノヌシ",hp:1600,spd:15,leak:10,meat:180,likes:EMBER,fly:false,nushi:1,kneel:8,terra:EMBER,tspd:.75,guard:"homura",atk:{dmg:22,rate:1.5,rng:95,stop:false,proj:"#F7C24A"}}};
+const ACTS={irr:{name:"灌漑",sub:"18 地脈",cost:18,to:MIRE},burn:{name:"焼却",sub:"18 地脈",cost:18,to:EMBER},rise:{name:"隆起",sub:"30 地脈",cost:30,to:ROCK}};
+const KANJI=["壱","弐","参","肆","伍","陸","漆","捌","玖","拾","十一","十二","十三","十四","十五","十六","十七","十八","十九","二十"];
+
+const STAGES=[
+ {id:"s1",name:"浅瀬の相",sub:"渡りはまだ細い。地形を育てる練習の地。",cost:0,req:[],nest:20,ley:40,
+  entry:{r:4,c:0},goal:{r:4,c:14},scale:.85,cores:2,meat:60,soul:12,
+  map:["...............","...............","....m..........","...mm..........","...............","....m..........","...............","...............","...............","..............."],
+  waves:[{hashi:5},{hashi:7,koura:2},{hashi:9,koura:4},{hashi:11,koura:5}]},
+ {id:"s2",name:"焼野の相",sub:"焦土の帯が横たわる。翔ぶ者が現れる。",cost:2,req:["s1"],nest:20,ley:45,
+  entry:{r:1,c:0},goal:{r:8,c:14},scale:.92,cores:3,meat:80,soul:12,
+  map:["...............","......e........",".....eee.......","....eeeee......",".....eee.......","......e........","...............","...............","...............","..............."],
+  waves:[{hashi:6,homura:3},{hashi:9,koura:3},{homura:7},{hashi:11,koura:5,homura:4},{hashi:12,koura:6,homura:5}]},
+ {id:"s3",name:"岩稜の相",sub:"石の柱が立つ。奥に岩の主が眠る。",cost:3,req:["s1"],nest:22,ley:45,
+  entry:{r:5,c:0},goal:{r:4,c:14},scale:.95,cores:6,meat:120,soul:13,
+  map:["......r........","......r........","...............","........r......","........r......","...............","...r...........","...r...........","...............","..............."],
+  waves:[{koura:4},{hashi:8,koura:4},{koura:8},{koura:10,hashi:8},{iwaoya:1,koura:4}]},
+ {id:"s4",name:"湿床の相",sub:"大きな沼が中央に沈む。渡りは足を取られる。",cost:4,req:["s2","s3"],nest:22,ley:50,
+  entry:{r:8,c:0},goal:{r:2,c:14},scale:1.00,cores:4,meat:110,soul:14,
+  map:["...............","......mmm......",".....mmmmm.....","....mmmmmmm....",".....mmmmm.....","......mmm......","...............","...............","...............","..............."],
+  waves:[{hashi:8,homura:3},{koura:6,homura:4},{hashi:12,koura:6},{koura:9,homura:8},{hashi:15,koura:9,homura:7}]},
+ {id:"s5",name:"灰と沼の境",sub:"沼と焦土が睨み合う。どちらに寄せるかが問われる。",cost:5,req:["s4"],nest:24,ley:50,
+  entry:{r:4,c:0},goal:{r:4,c:14},scale:1.05,cores:5,meat:130,soul:14,
+  map:["..mmm.....eee..","..mmm.....eee..","..mmm.....eee..","...mm.....ee...","...............","...mm.....ee...","..mmm.....eee..","..mmm.....eee..","..mmm.....eee..","..............."],
+  waves:[{hashi:9,homura:4},{koura:8,homura:6},{hashi:14,koura:8},{koura:11,homura:9},{hashi:18,koura:12,homura:10}]},
+ {id:"s6",name:"相の底",sub:"すべての地形が入り組む。相の主が待つ。",cost:8,req:["s5"],nest:26,ley:55,
+  entry:{r:4,c:0},goal:{r:4,c:14},scale:1.10,cores:8,meat:200,soul:16,
+  map:["....r.....r....","....r.....r....","..mm......ee...","..mm......ee...","...............","..ee......mm...","..ee......mm...","....r.....r....","....r.....r....","..............."],
+  waves:[{hashi:10,homura:5},{koura:11,homura:8},{hashi:16,koura:9,homura:7},{koura:14,homura:12},{hashi:22,koura:15,homura:13},{sounushi:1,homura:6,koura:5}]}
+];
+
+/* ================= meta ================= */
+let M,G=null,screen="title";
+function newMeta(){
+ const m={roster:[],meat:200,cores:2,cleared:{},opened:{},seq:{},known:{numa:1,hino:1,iwa:1},dex:{},
+  party:[],stage:null,inspect:null,filter:"all"};
+ return m;}
+function slotOf(ind){return UNITS[ind.key].slots||1;}
+function partySlots(){return M.party.reduce((s,i)=>s+slotOf(i),0);}
+const PARTY_MAX=6;
+function capacity(){return PARTY_MAX;}
+
+function usable(ind){return ind.rest<=0&&ind.fatigue<FATIGUE_MAX;}
+function born(key){
+ M.seq[key]=(M.seq[key]||0)+1;
+ const d=UNITS[key],n=M.seq[key];
+ const ind={id:key+"_"+n,key,num:n,name:d.name+"・"+(KANJI[n-1]||n),
+  scars:[],adapt:{1:0,2:0,3:0},rec:{dmg:0,kills:0,taken:0},
+  fatigue:0,rest:0,down:false,hp:d.hp,max:d.hp};
+ ind.max=maxhp(ind);ind.hp=ind.max;
+ M.roster.push(ind);return ind;}
+function afterMetaChange(){if(screen!=="stage")autosave();}
+function maxhp(ind){let h=UNITS[ind.key].hp;for(const s of ind.scars)h*=SCARS[s].hp;return Math.round(h);}
+function statOf(ind){
+ const d=UNITS[ind.key];
+ let dmg=d.dmg,rate=d.rate,rng=d.rng,aff=[d.aff];
+ for(const s of ind.scars){const S=SCARS[s];dmg*=S.dmg;rate*=S.rate;rng*=S.rng;
+  if(S.extraAff!==null&&!aff.includes(S.extraAff))aff.push(S.extraAff);}
+ for(const t of[MIRE,EMBER,ROCK])if(ind.adapt[t]>=ADAPT_AFF&&!aff.includes(t))aff.push(t);
+ return{dmg,rate,rng,aff,terr:d.terr,terra:d.terra,tspd:d.tspd,proj:d.proj,spr:d.spr};}
+function evoProg(ind,e){
+ const a=Math.min(1,(ind.adapt[e.ter]||0)/e.tn),b=Math.min(1,ind.rec[e.st]/e.sn);
+ return{a,b,ready:a>=1&&b>=1,v:(a+b)/2};}
+function evolve(ind,e){
+ const old=ind.name;
+ ind.key=e.to;ind.name=UNITS[e.to].name+"・"+(KANJI[ind.num-1]||ind.num);
+ ind.max=maxhp(ind);ind.hp=ind.max;
+ if(G){const u=G.units.find(x=>x.ind===ind);if(u){u.st=statOf(ind);G.fx.push({x:u.x,y:u.y,t:0,k:"evo"});}}
+ tick(`<b>${old}</b>が形を変えた。<em>${ind.name}</em> — ${UNITS[e.to].tag}。`);
+ autosave();render();}
+
+/* ================= persistence ================= */
+const SAVE_KEY="living_terrain_vbeta";
+const SAVE_VER=1;
+function serialize(){
+ const idOf=i=>i?M.roster.indexOf(i):-1;
+ return{v:SAVE_VER,meat:M.meat,cores:M.cores,cleared:M.cleared,opened:M.opened,
+  seq:M.seq,known:M.known,dex:M.dex,filter:M.filter,
+  stage:M.stage?M.stage.id:null,
+  party:M.party.map(idOf),
+  inspect:idOf(M.inspect),
+  roster:M.roster.map(i=>({key:i.key,num:i.num,name:i.name,scars:i.scars.slice(),
+   adapt:{1:i.adapt[1],2:i.adapt[2],3:i.adapt[3]},
+   rec:{dmg:i.rec.dmg,kills:i.rec.kills,taken:i.rec.taken},
+   fatigue:i.fatigue,rest:i.rest}))};}
+function deserialize(o){
+ if(!o||o.v!==SAVE_VER)return false;
+ const m=newMeta();
+ m.meat=o.meat;m.cores=o.cores;m.cleared=o.cleared||{};m.opened=o.opened||{};
+ m.seq=o.seq||{};m.known=o.known||{numa:1,hino:1,iwa:1};m.dex=o.dex||{};
+ m.filter=o.filter||"all";
+ m.roster=(o.roster||[]).map(r=>{
+  const ind={key:r.key,num:r.num,name:r.name,scars:r.scars||[],
+   adapt:{1:r.adapt[1]||0,2:r.adapt[2]||0,3:r.adapt[3]||0},
+   rec:{dmg:r.rec.dmg||0,kills:r.rec.kills||0,taken:r.rec.taken||0},
+   fatigue:r.fatigue||0,rest:r.rest||0,down:false};
+  ind.max=maxhp(ind);ind.hp=ind.max;return ind;});
+ m.party=(o.party||[]).map(i=>m.roster[i]).filter(Boolean);
+ m.inspect=o.inspect>=0?m.roster[o.inspect]:null;
+ m.stage=o.stage?STAGES.find(x=>x.id===o.stage)||null:null;
+ M=m;return true;}
+function encode(){try{return btoa(unescape(encodeURIComponent(JSON.stringify(serialize()))));}catch(e){return"";}}
+function decode(str){try{return JSON.parse(decodeURIComponent(escape(atob(str.trim()))));}catch(e){return null;}}
+let LS_OK=false;
+try{localStorage.setItem("__lt_test","1");localStorage.removeItem("__lt_test");LS_OK=true;}catch(e){LS_OK=false;}
+function autosave(){if(!LS_OK)return;try{localStorage.setItem(SAVE_KEY,encode());}catch(e){}}
+function hasSave(){if(!LS_OK)return false;try{return!!localStorage.getItem(SAVE_KEY);}catch(e){return false;}}
+function loadAuto(){if(!LS_OK)return false;try{const raw=localStorage.getItem(SAVE_KEY);if(!raw)return false;
+ const o=decode(raw);return o?deserialize(o):false;}catch(e){return false;}}
+
+/* ================= battle ================= */
+function soulReward(f){
+ if(f.nushi)return 18;
+ return f.soul!=null?f.soul:Math.max(1,Math.round(f.meat*0.28));}
+const cx=c=>c*CELL+CELL/2,cy=r=>r*CELL+CELL/2;
+const cellAt=(x,y)=>({c:Math.floor(x/CELL),r:Math.floor(y/CELL)});
+function tick(h){const t=document.getElementById("ticker");if(t)t.innerHTML=h;}
+
+function startStage(sd){
+ const ter=[],prog=[];
+ for(let r=0;r<ROWS;r++){
+  ter.push(sd.map[r].split("").map(ch=>CH[ch]??BARREN));
+  prog.push(new Array(COLS).fill(0).map(()=>({to:-1,v:0})));}
+ G={sd,ter,prog,dist:null,distC:null,route:[],routeC:[],
+  entry:sd.entry,goal:sd.goal,
+  units:[],foes:[],shots:[],fx:[],
+  ley:sd.ley,nest:sd.nest,soul:sd.soul!=null?sd.soul:12,soulFrac:0,wave:0,
+  sel:null,act:null,picked:null,hover:null,
+  queue:[],spawnT:0,running:false,over:false};
+ for(const i of M.party){i.down=false;i.hp=i.max;}
+ G.run={meat:0};
+ recalc();
+ screen="stage";
+ document.getElementById("msg").classList.remove("on");
+ tick(`<b>${sd.name}</b>。${sd.sub}`);
+ render();}
+
+function passable(r,c){return G.ter[r][c]!==ROCK;}
+function bfs(climb){
+ const d=[];for(let r=0;r<ROWS;r++)d.push(new Array(COLS).fill(Infinity));
+ const ok=(r,c)=>climb||passable(r,c);
+ if(!ok(G.goal.r,G.goal.c))return d;
+ d[G.goal.r][G.goal.c]=0;const q=[[G.goal.r,G.goal.c]];
+ for(let i=0;i<q.length;i++){const[r,c]=q[i];
+  for(const[dr,dc]of[[1,0],[-1,0],[0,1],[0,-1]]){
+   const nr=r+dr,nc=c+dc;
+   if(nr<0||nc<0||nr>=ROWS||nc>=COLS)continue;
+   if(!ok(nr,nc)||d[nr][nc]<Infinity)continue;
+   d[nr][nc]=d[r][c]+1;q.push([nr,nc]);}}
+ return d;}
+function trace(d){
+ const route=[];let r=G.entry.r,c=G.entry.c,guard=0;
+ if(d[r][c]===Infinity)return route;
+ route.push([r,c]);
+ while(!(r===G.goal.r&&c===G.goal.c)&&guard++<400){
+  let best=null,bv=d[r][c];
+  for(const[dr,dc]of[[0,1],[1,0],[-1,0],[0,-1]]){
+   const nr=r+dr,nc=c+dc;
+   if(nr<0||nc<0||nr>=ROWS||nc>=COLS)continue;
+   if(d[nr][nc]<bv){bv=d[nr][nc];best=[nr,nc];}}
+  if(!best)break;r=best[0];c=best[1];route.push([r,c]);}
+ return route;}
+function recalc(){G.dist=bfs(false);G.distC=bfs(true);G.route=trace(G.dist);G.routeC=trace(G.distC);}
+function reachableIf(r,c,t){const o=G.ter[r][c];G.ter[r][c]=t;const d=bfs(false);
+ const ok=d[G.entry.r][G.entry.c]<Infinity;G.ter[r][c]=o;return ok;}
+
+function canPlace(r,c,ind){
+ if(r===G.goal.r&&c===G.goal.c)return "巣の上には出せない。";
+ if(G.ter[r][c]===ROCK&&!statOf(ind).aff.includes(ROCK))return "岩場に立てるのは岩場に適性を持つ者だけだ。";
+ if(G.units.some(u=>u.r===r&&u.c===c))return "そこには既にいる。";
+ return null;}
+function soulCostBase(ind){const d=UNITS[ind.key];
+ return d.nushi?10:d.evo?7:Math.max(2,Math.round(d.cost/12));}
+function soulCost(ind,r,c){
+ let cost=soulCostBase(ind);
+ // 適性地形の上に出すなら大幅割引（体感で変わるくらい）
+ if(G&&r!=null&&c!=null){
+  const here=G.ter[r][c];
+  if(statOf(ind).aff.includes(here))cost=Math.max(1,Math.round(cost*0.5));
+ }
+ return cost;}
+function deploy(ind,r,c){
+ const err=canPlace(r,c,ind);if(err){tick(err);return;}
+ const cost=soulCost(ind,r,c);
+ if(G.soul<cost){tick("魂が足りない。渡りを倒すか、地形を育てると溜まる。");return;}
+ G.soul-=cost;
+ const disc=cost<soulCostBase(ind);
+ G.units.push({ind,st:statOf(ind),r,c,x:cx(c),y:cy(r),hx:cx(c),hy:cy(r),cd:0,settle:0,flash:0,root:0});
+ G.fx.push({x:cx(c),y:cy(r),t:0,k:"ring",col:"#7FB04A"});
+ const st=statOf(ind);
+ tick(`<b>${ind.name}</b>を出した（魂 ${cost}${disc?" · 適性地形で割引":""}）。${st.terra!==null?TERRAIN[st.terra].name+"が広がりはじめる。":""}`);}
+function recall(u){
+ G.soul+=Math.round(soulCostBase(u.ind)*.5);
+ G.units.splice(G.units.indexOf(u),1);G.sel=null;
+ tick(`<b>${u.ind.name}</b>を引き戻した。魂が半分戻る。`);}
+function wound(u){
+ const ind=u.ind;
+ if(u.temp){G.units.splice(G.units.indexOf(u),1);if(G.sel===u)G.sel=null;
+  G.fx.push({x:u.x,y:u.y,t:0,k:"down"});tick("寄生した個体が力尽きた。");return;}
+ ind.down=true;
+ let s=null;const t=G.ter[u.r][u.c];
+ s=t===EMBER?"burn":t===MIRE?"mire":t===ROCK?"stone":"chip";
+ ind.pendScar=s;
+ G.units.splice(G.units.indexOf(u),1);
+ if(G.sel===u)G.sel=null;
+ G.fx.push({x:u.x,y:u.y,t:0,k:"down"});
+ tick(`<b>${ind.name}</b>が倒れた。この戦いには戻らない。`);
+ render();}
+function useAct(key,r,c){
+ const a=ACTS[key];
+ if(G.ley<a.cost){tick("地脈が足りない。地形が育つほど溜まる。");return;}
+ if(r===G.goal.r&&c===G.goal.c){tick("巣の地形は変えられない。");return;}
+ if(a.to===ROCK){
+  const on=G.units.find(u=>u.r===r&&u.c===c);
+  if(on&&!on.st.aff.includes(ROCK)){tick("そこにいる者は岩場では暮らせない。");return;}
+  if(!reachableIf(r,c,ROCK)){tick("道を完全に塞ぐことはできない。渡りには通り道がいる。");return;}}
+ if(G.ter[r][c]===a.to){tick("すでにその地形だ。");return;}
+ G.ley-=a.cost;G.ter[r][c]=a.to;G.prog[r][c]={to:-1,v:0};recalc();
+ G.fx.push({x:cx(c),y:cy(r),t:0,k:"ring",col:TERRAIN[a.to].spec});
+ tick(`${TERRAIN[a.to].name}に変えた。`);}
+
+function terraform(dt){
+ for(const u of G.units){
+  const st=u.st;if(st.terra===null)continue;
+  const rad=Math.ceil(st.terr);
+  for(let dr=-rad;dr<=rad;dr++)for(let dc=-rad;dc<=rad;dc++){
+   const r=u.r+dr,c=u.c+dc;
+   if(r<0||c<0||r>=ROWS||c>=COLS)continue;
+   if(Math.hypot(dr,dc)>st.terr)continue;
+   const cur=G.ter[r][c];
+   if(cur===st.terra||cur===ROCK)continue;
+   const home=(dr===0&&dc===0);
+   let touch=home;
+   if(!touch)for(const[a,b]of[[1,0],[-1,0],[0,1],[0,-1]]){
+    const nr=r+a,nc=c+b;
+    if(nr<0||nc<0||nr>=ROWS||nc>=COLS)continue;
+    if(G.ter[nr][nc]===st.terra){touch=true;break;}}
+   if(!touch)continue;
+   if(st.terra===ROCK){
+    const on=G.units.find(o=>o.r===r&&o.c===c);
+    if(on&&!on.st.aff.includes(ROCK))continue;
+    if(r===G.goal.r&&c===G.goal.c)continue;}
+   const p=G.prog[r][c];
+   if(p.to!==st.terra){p.to=st.terra;p.v*=.3;}
+   p.v+=dt*st.tspd*(home?.55:.3);
+   if(p.v>=1){
+    if(st.terra===ROCK&&!reachableIf(r,c,ROCK)){p.v=.9;continue;}
+    G.ter[r][c]=st.terra;p.to=-1;p.v=0;
+    if(st.terra===ROCK)recalc();}}}
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+  const p=G.prog[r][c];if(p.to>=0)p.v=Math.max(0,p.v-dt*.06);}}
+
+function startWave(){
+ if(G.over||G.wave>=G.sd.waves.length)return;
+ const w=G.sd.waves[G.wave];G.wave++;
+ G.queue=[];
+ for(const k in w)for(let i=0;i<w[k];i++)G.queue.push(k);
+ for(let i=G.queue.length-1;i>0;i--){const j=(Math.random()*(i+1))|0;[G.queue[i],G.queue[j]]=[G.queue[j],G.queue[i]];}
+ G.running=true;G.spawnT=0;
+ tick(`第 <b>${G.wave}</b> の渡りが来る。`);render();}
+function spawn(k){
+ const f=FOES[k],mul=G.sd.scale;
+ G.foes.push({f,key:k,hp:f.hp*mul,max:f.hp*mul,
+  x:-16-Math.random()*30,y:cy(G.entry.r)+(Math.random()*30-15),
+  cap:0,cd:Math.random()*.5,px:0,py:0,lock:0,by:null,
+  kneel:0,knelt:0,rage:0,chase:0,chaseCd:0,root:0});}
+function spawnAt(k,x,y){
+ const f=FOES[k],mul=G.sd.scale;
+ G.foes.push({f,key:k,hp:f.hp*mul,max:f.hp*mul,x,y,cap:0,cd:0,px:0,py:0,lock:0,by:null,kneel:0,knelt:0,rage:0,chase:0,chaseCd:0,root:0});}
+function parasitize(e){
+ const key=e.key,d=UNITS[key];
+ const ind={key,name:d.name+"（寄生）",scars:[],adapt:{1:0,2:0,3:0},rec:{dmg:0,kills:0,taken:0},
+  temp:true,hp:Math.round(d.hp*.6),max:Math.round(d.hp*.6),down:false,fatigue:0,rest:0};
+ const cc=cellAt(e.x,e.y);
+ const r=Math.max(0,Math.min(ROWS-1,cc.r)),c=Math.max(0,Math.min(COLS-1,cc.c));
+ G.units.push({ind,st:statOf(ind),r,c,x:e.x,y:e.y,hx:e.x,hy:e.y,cd:0,settle:0,flash:0,root:0,temp:true});
+ G.foes.splice(G.foes.indexOf(e),1);
+ G.fx.push({x:e.x,y:e.y,t:0,k:"cap"});
+ tick(`<b>${d.name}</b>を乗っ取った。波が終わるまで味方として戦う。`);}
+
+function step(dt){
+ if(!G||G.over)return;
+ let live=0;
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){const t=G.ter[r][c];if(t===MIRE||t===EMBER)live++;}
+ G.ley=Math.min(999,G.ley+dt*live*.05);
+ G.soulFrac+=dt*live*.028;
+ if(G.soulFrac>=1){const g=Math.floor(G.soulFrac);G.soul+=g;G.soulFrac-=g;}
+ terraform(dt);
+ if(G.running&&G.queue.length){G.spawnT-=dt;if(G.spawnT<=0){spawn(G.queue.shift());G.spawnT=.62;}}
+
+ for(const e of G.foes){e.px=0;e.py=0;}
+ for(let i=0;i<G.foes.length;i++)for(let j=i+1;j<G.foes.length;j++){
+  const a=G.foes[i],b=G.foes[j];
+  if(a.f.fly!==b.f.fly)continue;
+  let dx=b.x-a.x,dy=b.y-a.y,d2=dx*dx+dy*dy;
+  if(d2>420||d2<.01)continue;
+  const d=Math.sqrt(d2),push=(21-d)*3.2;dx/=d;dy/=d;
+  a.px-=dx*push;a.py-=dy*push;b.px+=dx*push;b.py+=dy*push;}
+
+ for(let i=G.foes.length-1;i>=0;i--){
+  const e=G.foes[i],f=e.f;
+  const cc=cellAt(e.x,e.y);
+  const inb=cc.r>=0&&cc.r<ROWS&&cc.c>=0&&cc.c<COLS;
+  const ter=inb?G.ter[cc.r][cc.c]:BARREN;
+  if(ter===EMBER&&!e.f.nushi)e.hp-=dt*7;
+
+  /* --- 主：屈服 --- */
+  if(e.f.nushi){
+   if(inb&&e.f.terra!==undefined&&G.ter[cc.r][cc.c]!==e.f.terra&&G.ter[cc.r][cc.c]!==ROCK){
+    const pp=G.prog[cc.r][cc.c];
+    if(pp.to!==e.f.terra){pp.to=e.f.terra;pp.v*=.4;}
+    pp.v+=dt*e.f.tspd;
+    if(pp.v>=1){
+     if(e.f.terra!==ROCK||reachableIf(cc.r,cc.c,ROCK)){
+      G.ter[cc.r][cc.c]=e.f.terra;pp.to=-1;pp.v=0;
+      if(e.f.terra===ROCK)recalc();}
+     else pp.v=.9;}}
+   if(e.kneel>0){
+    e.kneel-=dt;e.cap+=dt/(e.f.kneel*.85);
+    if(e.cap>=1){
+     G.foes.splice(i,1);G.fx.push({x:e.x,y:e.y,t:0,k:"cap"});
+     M.dex[e.key]=1;M.known[e.key]=1;M.cores+=3;
+     const ind=born(e.key);
+     tick(`<b>${e.f.name}</b>が膝をついたまま従った。<em>${ind.name}</em>が群れに加わった。核 +3。`);
+     render();continue;}
+    if(e.kneel<=0){
+     e.hp=e.max*.5;e.cap=0;e.rage++;
+     tick(`<b>${e.f.name}</b>が立ち上がった。抑えきれなかった。`);}
+    continue;}
+   if(e.hp<=0){
+    e.hp=1;e.knelt++;
+    e.kneel=Math.max(3,e.f.kneel-(e.knelt-1)*3);
+    e.cap=0;
+    G.fx.push({x:e.x,y:e.y,t:0,k:"down"});
+    tick(`<b>${e.f.name}</b>が膝をついた。<em>抑え続ければ従う</em>。護衛が来る。`);
+    for(let q=0;q<4;q++)spawnAt(e.f.guard,-20-q*26,cy(G.entry.r)+(Math.random()*30-15));
+    continue;}}
+
+  const weak=e.hp<=e.max*.3;
+  if(weak&&ter===f.likes&&!f.nushi){
+   e.cap+=dt/1.3;
+   if(e.cap>=1){
+    G.foes.splice(i,1);G.fx.push({x:e.x,y:e.y,t:0,k:"cap"});
+    const nw=!M.dex[e.key];M.dex[e.key]=1;M.known[e.key]=1;M.cores+=1;
+    const ind=born(e.key);
+    tick(nw?`<b>${f.name}</b>がこの土地に棲みついた。<em>${ind.name}</em>として群れに加わった。核 +1。`
+          :`<em>${ind.name}</em>を迎え入れた。核 +1。`);
+    render();continue;}}
+  else e.cap=Math.max(0,e.cap-dt*.7);
+  if(e.hp<=0){if(e.by)e.by.rec.kills++;G.soul+=soulReward(f);G.run.meat+=f.meat;G.foes.splice(i,1);
+   G.fx.push({x:e.x,y:e.y,t:0,k:"die"});render();continue;}
+
+  // 索敵：攻撃射程より一回り広い範囲で味方を探す
+  const detect=f.detect!=null?f.detect:f.atk.rng+52;
+  let near=null,nd=1e9;
+  for(const u of G.units){const d=Math.hypot(u.x-e.x,u.y-e.y);if(d<detect&&d<nd){nd=d;near=u;}}
+  const victim=(near&&nd<=f.atk.rng)?near:null;
+  const vd=nd;
+  if(e.root>0)e.root-=dt;
+  e.cd-=dt;let holding=false;
+  if(victim){
+   e.lock+=dt;
+   if(f.atk.stop&&e.lock<4.5)holding=true;
+   if(e.cd<=0){e.cd=f.atk.rate;e.root=ATTACK_ROOT;
+    const ad=f.atk.dmg*(1+e.rage*.5);
+    if(f.atk.proj)G.shots.push({x:e.x,y:e.y,tu:victim,col:f.atk.proj,dmg:ad,foe:true});
+    else hitUnit(victim,ad);}}
+  else e.lock=Math.max(0,e.lock-dt*.8);
+
+  if(!holding&&!(e.root>0)){
+   let sp=f.spd*(1+e.rage*.3);
+   if(!f.fly&&ter===MIRE)sp*=.45;else if(f.fly&&ter===MIRE)sp*=.85;
+   if(f.climbs&&ter===ROCK)sp*=.62;
+   // 寄り道：射程内に入るまで味方へ近づく（長引いたら諦めて巣へ）
+   let detour=false;
+   if(e.chaseCd>0)e.chaseCd-=dt;
+   else if(near&&!f.nushi&&nd>f.atk.rng*.8){
+    e.chase+=dt;
+    if(e.chase>4){e.chase=0;e.chaseCd=6;}
+    else detour=true;}
+   else if(!near)e.chase=Math.max(0,e.chase-dt*.5);
+   e.det=detour;e.detTo=detour?near:null;
+   let tx,ty;
+   if(detour){tx=near.x;ty=near.y;}
+   else if(f.fly){tx=cx(G.goal.c);ty=cy(G.goal.r);}
+   else{
+    const F=f.climbs?G.distC:G.dist;
+    let best=null,bv=inb?F[cc.r][cc.c]:Infinity;
+    if(inb)for(const[dr,dc]of[[0,1],[1,0],[-1,0],[0,-1]]){
+     const nr=cc.r+dr,nc=cc.c+dc;
+     if(nr<0||nc<0||nr>=ROWS||nc>=COLS)continue;
+     if(F[nr][nc]<bv){bv=F[nr][nc];best=[nr,nc];}}
+    if(best){tx=cx(best[1]);ty=cy(best[0]);}else{tx=e.x+CELL;ty=cy(G.entry.r);}}
+   const dx=tx-e.x,dy=ty-e.y,dd=Math.hypot(dx,dy)||1;
+   e.x+=dx/dd*sp*dt;e.y+=dy/dd*sp*dt;e.x+=e.px*dt;e.y+=e.py*dt;}
+
+  if(Math.hypot(cx(G.goal.c)-e.x,cy(G.goal.r)-e.y)<CELL*.55){
+   G.nest-=f.leak;G.foes.splice(i,1);G.fx.push({x:0,y:0,t:0,k:"hit"});
+   if(G.nest<=0){G.nest=0;finish(false);}
+   render();}}
+
+ for(let i=G.units.length-1;i>=0;i--){
+  const u=G.units[i],ind=u.ind;
+  u.st=statOf(ind);const st=u.st;
+  if(u.settle>0)u.settle-=dt;
+  if(u.flash>0)u.flash-=dt;
+  if(u.root>0)u.root-=dt;
+  u.cd-=dt;
+  const here=G.ter[u.r][u.c];
+  if(here!==BARREN){
+   const was=ind.adapt[here]>=ADAPT_AFF;
+   ind.adapt[here]=Math.min(200,ind.adapt[here]+dt);
+   if(!was&&ind.adapt[here]>=ADAPT_AFF){
+    tick(`<b>${ind.name}</b>が<em>${TERRAIN[here].name}に順応した</em>。`);
+    G.fx.push({x:u.x,y:u.y,t:0,k:"ring",col:"#7FB04A"});render();}}
+  const onAff=st.aff.includes(here);
+  if(onAff&&ind.hp<ind.max)ind.hp=Math.min(ind.max,ind.hp+dt*4.5);
+  const pow=(onAff?1.3:1)*(u.settle>0?.4:1);
+  const rate=st.rate/(onAff?1.15:1);
+  const rng=st.rng+(here===ROCK?14:0);
+  let tgt=null,bd=1e9;
+  for(const e of G.foes){
+   const d=Math.hypot(e.x-u.x,e.y-u.y),dh=Math.hypot(e.x-u.hx,e.y-u.hy);
+   if(dh>st.terr*CELL+rng)continue;
+   if(d<bd){bd=d;tgt=e;}}
+  let gx,gy;
+  const keep=rng*.92;           // この距離までは詰める（射程内で撃てる位置）
+  if(st.proj){
+   if(tgt&&bd<rng*.45){gx=u.x-(tgt.x-u.x);gy=u.y-(tgt.y-u.y);}   // 近すぎる → 退く
+   else if(tgt&&bd>keep){gx=tgt.x;gy=tgt.y;}                      // 遠い → 詰める
+   else if(tgt){gx=u.x;gy=u.y;}                                   // 射程内 → 留まって撃つ
+   else{gx=u.hx;gy=u.hy;}}
+  else{
+   if(tgt&&bd<=keep){gx=u.x;gy=u.y;}
+   else{gx=tgt?tgt.x:u.hx;gy=tgt?tgt.y:u.hy;}}
+  let vx=gx-u.x,vy=gy-u.y,vd2=Math.hypot(vx,vy);
+  const msp=st.proj?26:38;
+  if(vd2>2&&!(u.root>0)){u.x+=vx/vd2*msp*dt;u.y+=vy/vd2*msp*dt;}
+  const ox=u.x-u.hx,oy=u.y-u.hy,od=Math.hypot(ox,oy),lim=st.terr*CELL;
+  if(od>lim){u.x=u.hx+ox/od*lim;u.y=u.hy+oy/od*lim;}
+  const bdNow=tgt?Math.hypot(tgt.x-u.x,tgt.y-u.y):1e9;
+  if(tgt&&bdNow<=rng&&u.cd<=0){
+   u.cd=rate;u.root=ATTACK_ROOT;const dmg=st.dmg*pow;
+   if(UNITS[ind.key].para)G.shots.push({x:u.x,y:u.y,e:tgt,col:st.proj,dmg,by:ind,para:1});
+   else if(st.proj)G.shots.push({x:u.x,y:u.y,e:tgt,col:st.proj,dmg,by:ind});
+   else{tgt.hp-=dmg;tgt.by=ind;ind.rec.dmg+=dmg;G.fx.push({x:tgt.x,y:tgt.y,t:0,k:"slash"});}}}
+
+ for(let i=G.shots.length-1;i>=0;i--){
+  const s=G.shots[i];
+  const target=s.foe?s.tu:s.e;
+  const alive=s.foe?G.units.includes(s.tu):G.foes.includes(s.e);
+  if(!alive){G.shots.splice(i,1);continue;}
+  const dx=target.x-s.x,dy=target.y-s.y,d=Math.hypot(dx,dy);
+  if(d<8){
+   if(s.foe)hitUnit(s.tu,s.dmg);
+   else if(s.para){
+    if(!s.e.f.nushi&&s.e.hp<=s.e.max*.45)parasitize(s.e);
+    else{s.e.hp-=s.dmg;if(s.by){s.e.by=s.by;s.by.rec.dmg+=s.dmg;}G.fx.push({x:s.e.x,y:s.e.y,t:0,k:"slash"});}}
+   else{s.e.hp-=s.dmg;if(s.by){s.e.by=s.by;s.by.rec.dmg+=s.dmg;}G.fx.push({x:s.e.x,y:s.e.y,t:0,k:"slash"});}
+   G.shots.splice(i,1);continue;}
+  s.x+=dx/d*300*dt;s.y+=dy/d*300*dt;}
+
+ for(let i=G.fx.length-1;i>=0;i--){G.fx[i].t+=dt;if(G.fx[i].t>.6)G.fx.splice(i,1);}
+
+ if(G.running&&!G.queue.length&&!G.foes.length){
+  G.running=false;
+  if(G.wave>=G.sd.waves.length)finish(true);
+  else{
+   for(const i of M.party)if(!i.down)i.hp=Math.min(i.max,i.hp+i.max*.3);
+   const names=[];
+   for(let i=G.units.length-1;i>=0;i--){
+    const u=G.units[i];
+    if(!u.temp)continue;
+    const nw=!M.dex[u.ind.key];M.dex[u.ind.key]=1;M.known[u.ind.key]=1;
+    const ni=born(u.ind.key);names.push(ni.name);
+    G.fx.push({x:u.x,y:u.y,t:0,k:"cap"});
+    G.units.splice(i,1);}
+   tick(`第 ${G.wave} の渡りを凌いだ。群れが息を整えた。`
+    +(names.length?` 乗っ取った ${names.join("、")} が居着いた。`:""));
+   render();}}}
+
+function hitUnit(u,dmg){
+ const ind=u.ind;ind.hp-=dmg;ind.rec.taken+=dmg;u.flash=.18;
+ G.fx.push({x:u.x,y:u.y-14,t:0,k:"bite"});
+ if(ind.hp<=0)wound(u);}
+
+function finish(win){
+ G.over=true;G.running=false;
+ const sd=G.sd;
+ // resolve party
+ let scarred=[];
+ M.meat+=G.run?G.run.meat:0;
+ for(const i of M.party){
+  i.fatigue=Math.min(FATIGUE_MAX,i.fatigue+1);
+  if(i.down){
+   i.rest=WOUND_REST;
+   if(i.pendScar&&Math.random()<.5&&i.scars.length<3){
+    i.scars.push(i.pendScar);scarred.push(i.name+"に"+SCARS[i.pendScar].name);
+    i.max=maxhp(i);}
+   i.pendScar=null;}
+  i.hp=i.max;}
+ for(const i of M.roster){
+  if(M.party.includes(i))continue;
+  i.fatigue=Math.max(0,i.fatigue-FATIGUE_REC);
+  if(i.rest>0){i.rest--;}
+  i.hp=i.max;}
+ let extra="";
+ if(win&&!M.cleared[sd.id]){
+  M.cleared[sd.id]=1;M.cores+=sd.cores;M.meat+=sd.meat;
+  extra=`核 +${sd.cores}、肉 +${sd.meat}。`;}
+ else if(win)extra="すでに拓いた相を、もう一度守り抜いた。";
+ const m=document.getElementById("msg");
+ document.getElementById("msg-t").textContent=win?"相は生きている":"巣が落ちた";
+ document.getElementById("msg-b").textContent=(win
+  ?`${sd.name}を守り抜いた。${extra}`
+  :`${sd.name}は渡りに飲まれた。倒れた個体は死んではいない。休ませ、地形を育て直して、また来ればいい。`)
+  +(scarred.length?` ${scarred.join("、")}が残った。`:"");
+ m.classList.add("on");autosave();render();}
+
+function toNest(){screen="nest";G=null;window.scrollTo(0,0);render();}
+
+/* ================= render (canvas) ================= */
+const cv=document.getElementById("cv"),g=cv.getContext("2d");
+g.imageSmoothingEnabled=false;
+function noise(r,c){return((r*73856093^c*19349663)>>>0);}
+function drawSpr(s,x,y,sz,flip){g.save();g.translate(x,y);if(flip)g.scale(-1,1);g.drawImage(s,-sz/2,-sz/2,sz,sz);g.restore();}
+function draw(){
+ if(!G){g.clearRect(0,0,W,H);return;}
+ g.clearRect(0,0,W,H);
+ for(let r=0;r<ROWS;r++)for(let c=0;c<COLS;c++){
+  const t=G.ter[r][c],T=TERRAIN[t],x=c*CELL,y=r*CELL;
+  g.fillStyle=T.base;g.fillRect(x,y,CELL,CELL);
+  const n=noise(r,c);
+  g.fillStyle=T.spec;
+  for(let i=0;i<5;i++)g.fillRect(x+((n>>(i*3))%10)*4+2,y+((n>>(i*4+1))%10)*4+2,4,4);
+  g.fillStyle=T.dark;
+  for(let i=0;i<3;i++)g.fillRect(x+((n>>(i*5+2))%10)*4+2,y+((n>>(i*2+3))%10)*4+2,4,4);
+  const p=G.prog[r][c];
+  if(p.to>=0&&p.v>.02){
+   g.fillStyle=TERRAIN[p.to].base;
+   const thr=Math.ceil(p.v*11);
+   for(let a=0;a<11;a++)for(let b=0;b<11;b++){
+    if(((a*7+b*13+((n>>4)&7))%11)>=thr)continue;
+    g.fillRect(x+b*4,y+a*4,4,4);}}
+  g.strokeStyle="rgba(0,0,0,.22)";g.lineWidth=1;g.strokeRect(x+.5,y+.5,CELL-1,CELL-1);}
+
+ if(G.routeC.length&&G.routeC.length!==G.route.length){
+  g.save();g.setLineDash([2,6]);g.lineWidth=2;g.strokeStyle="rgba(138,147,156,.5)";
+  g.beginPath();G.routeC.forEach(([r,c],i)=>{i?g.lineTo(cx(c),cy(r)+4):g.moveTo(cx(c),cy(r)+4);});
+  g.stroke();g.restore();}
+ if(G.route.length){
+  g.save();g.setLineDash([3,7]);g.lineWidth=2;g.strokeStyle="rgba(232,224,206,.34)";
+  g.beginPath();G.route.forEach(([r,c],i)=>{i?g.lineTo(cx(c),cy(r)):g.moveTo(cx(c),cy(r));});
+  g.stroke();g.restore();}
+
+ g.fillStyle="rgba(196,72,60,.16)";g.fillRect(G.goal.c*CELL,G.goal.r*CELL,CELL,CELL);
+ g.strokeStyle="#C4483C";g.lineWidth=2;g.strokeRect(G.goal.c*CELL+3,G.goal.r*CELL+3,CELL-6,CELL-6);
+ g.font="10px ui-monospace,monospace";g.textAlign="center";
+ g.fillStyle="#C4483C";g.fillText("巣",cx(G.goal.c),cy(G.goal.r)+4);
+ g.fillStyle="rgba(232,224,206,.25)";g.fillText("入",cx(G.entry.c),cy(G.entry.r)+4);
+
+ for(const u of G.units){
+  g.save();g.setLineDash([2,5]);g.lineWidth=1;
+  g.strokeStyle=G.sel===u?"rgba(127,176,74,.9)":"rgba(232,224,206,.16)";
+  g.beginPath();g.arc(u.hx,u.hy,u.st.terr*CELL,0,7);g.stroke();g.restore();}
+ if(G.hover&&(G.picked||G.act)){
+  const{r,c}=G.hover;
+  if(r>=0&&r<ROWS&&c>=0&&c<COLS){
+   g.strokeStyle="#7FB04A";g.lineWidth=2;g.strokeRect(c*CELL+1,r*CELL+1,CELL-2,CELL-2);
+   if(G.picked){g.save();g.setLineDash([2,5]);g.lineWidth=1;g.strokeStyle="rgba(127,176,74,.55)";
+    g.beginPath();g.arc(cx(c),cy(r),statOf(G.picked).terr*CELL,0,7);g.stroke();g.restore();}}}
+
+ for(const u of G.units){
+  const st=u.st,ind=u.ind,here=G.ter[u.r][u.c];
+  if(st.aff.includes(here)){g.fillStyle="rgba(127,176,74,.13)";g.beginPath();g.arc(u.x,u.y+10,15,0,7);g.fill();}
+  if(u.temp){g.save();g.setLineDash([2,3]);g.strokeStyle="rgba(168,212,106,.8)";g.lineWidth=1;
+   g.beginPath();g.arc(u.x,u.y,17,0,7);g.stroke();g.restore();}
+  if(u.flash>0)g.globalAlpha=.75;
+  drawSpr(SPR[st.spr],u.x,u.y-2,32,false);g.globalAlpha=1;
+  if(u.flash>0){g.fillStyle="rgba(196,72,60,.45)";g.fillRect(u.x-16,u.y-18,32,32);}
+  if(ind.hp<ind.max){
+   const w=26,h=ind.hp/ind.max;
+   g.fillStyle="rgba(0,0,0,.6)";g.fillRect(u.x-w/2,u.y+15,w,3);
+   g.fillStyle=h<.35?"#C4483C":"#7FB04A";g.fillRect(u.x-w/2,u.y+15,w*h,3);}
+  if(u.settle>0){g.fillStyle="rgba(232,224,206,.5)";g.fillRect(u.x-11,u.y+20,22*(u.settle/3),2);}
+  if(u.root>0){g.fillStyle="rgba(224,114,44,.6)";g.fillRect(u.x-8,u.y+11,16*(u.root/ATTACK_ROOT),2);}}
+
+ for(const s of G.shots){g.fillStyle=s.col;g.fillRect(s.x-2,s.y-2,4,4);}
+ for(const e of G.foes){
+  if(e.det&&e.detTo){
+   g.save();g.setLineDash([2,4]);g.lineWidth=1;g.strokeStyle="rgba(196,72,60,.45)";
+   g.beginPath();g.moveTo(e.x,e.y);g.lineTo(e.detTo.x,e.detTo.y);g.stroke();g.restore();}
+  const sz=e.f.nushi?50:(e.f.fly?30:28);
+  if(e.f.nushi){g.fillStyle=e.kneel>0?"rgba(127,176,74,.18)":"rgba(196,72,60,.14)";
+   g.beginPath();g.arc(e.x,e.y,30,0,7);g.fill();}
+  drawSpr(SPR[e.f.spr],e.x,e.y,sz,true);
+  const w=e.f.nushi?46:24,hp=Math.max(0,e.hp/e.max);
+  const by=e.f.nushi?-30:-19;
+  g.fillStyle="rgba(0,0,0,.55)";g.fillRect(e.x-w/2,e.y+by,w,3);
+  g.fillStyle=hp<=.3?"#7FB04A":"#C4483C";g.fillRect(e.x-w/2,e.y+by,w*hp,3);
+  if(e.f.nushi&&e.kneel>0){
+   g.fillStyle="rgba(0,0,0,.55)";g.fillRect(e.x-w/2,e.y+by-6,w,4);
+   g.fillStyle="#7FB04A";g.fillRect(e.x-w/2,e.y+by-6,w*e.cap,4);
+   g.fillStyle="#E8E0CE";g.font="9px ui-monospace,monospace";g.textAlign="center";
+   g.fillText("屈服 "+e.kneel.toFixed(1),e.x,e.y+by-10);}
+  if(e.cap>0&&!e.f.nushi){g.strokeStyle="#7FB04A";g.lineWidth=2;g.beginPath();g.arc(e.x,e.y,17,-1.57,-1.57+6.283*e.cap);g.stroke();}
+  else if(e.hp<=e.max*.3){g.save();g.setLineDash([2,3]);g.strokeStyle="rgba(127,176,74,.75)";g.lineWidth=1;
+   g.beginPath();g.arc(e.x,e.y,17,0,7);g.stroke();g.restore();}}
+ for(const f of G.fx){
+  const a=1-f.t/.6;
+  if(f.k==="slash"){g.fillStyle=`rgba(255,240,200,${a})`;g.fillRect(f.x-3,f.y-3,6,6);}
+  else if(f.k==="bite"){g.fillStyle=`rgba(196,72,60,${a})`;g.fillRect(f.x-2,f.y-f.t*16,4,4);}
+  else if(f.k==="die"){g.strokeStyle=`rgba(196,72,60,${a})`;g.lineWidth=2;g.beginPath();g.arc(f.x,f.y,6+f.t*26,0,7);g.stroke();}
+  else if(f.k==="down"){g.strokeStyle=`rgba(232,224,206,${a})`;g.lineWidth=2;g.beginPath();g.arc(f.x,f.y,4+f.t*34,0,7);g.stroke();}
+  else if(f.k==="evo"){g.strokeStyle=`rgba(232,224,206,${a})`;g.lineWidth=3;g.beginPath();g.arc(f.x,f.y,4+f.t*52,0,7);g.stroke();
+   g.strokeStyle=`rgba(127,176,74,${a})`;g.lineWidth=2;g.beginPath();g.arc(f.x,f.y,4+f.t*30,0,7);g.stroke();}
+  else if(f.k==="cap"){g.strokeStyle=`rgba(127,176,74,${a})`;g.lineWidth=3;g.beginPath();g.arc(f.x,f.y,4+f.t*40,0,7);g.stroke();}
+  else if(f.k==="hit"){g.fillStyle=`rgba(196,72,60,${a*.5})`;g.fillRect(0,0,W,H);}
+  else if(f.k==="ring"){g.strokeStyle=f.col;g.globalAlpha=a;g.lineWidth=2;g.beginPath();g.arc(f.x,f.y,10+f.t*40,0,7);g.stroke();g.globalAlpha=1;}}}
+
+/* ================= input ================= */
+function pos(ev){const b=cv.getBoundingClientRect();const t=ev.touches?ev.touches[0]:ev;
+ return{x:(t.clientX-b.left)*(W/b.width),y:(t.clientY-b.top)*(H/b.height)};}
+cv.addEventListener("mousemove",e=>{if(G){const p=pos(e);G.hover=cellAt(p.x,p.y);}});
+cv.addEventListener("mouseleave",()=>{if(G)G.hover=null;});
+cv.addEventListener("click",e=>{
+ if(!G||G.over)return;
+ const p=pos(e),{r,c}=cellAt(p.x,p.y);
+ if(r<0||r>=ROWS||c<0||c>=COLS)return;
+ if(G.act){useAct(G.act,r,c);render();return;}
+ if(G.picked){deploy(G.picked,r,c);G.picked=null;render();return;}
+ const u=G.units.find(u=>u.r===r&&u.c===c);
+ if(u){
+  if(G.sel===u)G.sel=null;
+  else{G.sel=u;const here=G.ter[u.r][u.c],on=u.st.aff.includes(here);
+   const sc=u.ind.scars.map(s=>SCARS[s].name).join("・")||"なし";
+   tick(`<b>${u.ind.name}</b> — 体力 ${Math.ceil(u.ind.hp)}/${u.ind.max} · 攻撃 ${u.st.dmg.toFixed(1)} · 傷跡 ${sc}。いま${TERRAIN[here].name}の上${on?"<em>（適性：強化・自然回復）</em>":"（適性外）"}。空きマスで移住、「撤収」で引き戻す。`);}
+  render();return;}
+ if(G.sel){
+  const err=canPlace(r,c,G.sel.ind);if(err){tick(err);return;}
+  if(G.ley<12){tick("移住には地脈が 12 いる。");return;}
+  G.ley-=12;const s=G.sel;
+  s.r=r;s.c=c;s.hx=cx(c);s.hy=cy(r);s.x=cx(c);s.y=cy(r);s.settle=3;
+  tick(`<b>${s.ind.name}</b>が移り住んだ。馴染むまでしばらく弱い。`);
+  G.sel=null;render();}});
+window.addEventListener("keydown",e=>{if(e.key==="Escape"&&G){G.picked=null;G.act=null;G.sel=null;render();}});
+
+/* ================= UI ================= */
+function mini(sprKey,size){
+ const c=document.createElement("canvas");c.width=c.height=size;
+ const x=c.getContext("2d");x.imageSmoothingEnabled=false;
+ x.drawImage(SPR[sprKey],0,0,size,size);return c;}
+function stateOf(ind){
+ if(ind.down)return"倒れた";
+ if(ind.rest>0)return`重傷 あと${ind.rest}戦`;
+ if(ind.fatigue>=FATIGUE_MAX)return"疲弊 — 休ませろ";
+ if(ind.fatigue>0)return`疲労 ${ind.fatigue}`;
+ return"健在";}
+
+function render(){
+ document.getElementById("scr-title").style.display=screen==="title"?"":"none";
+ document.getElementById("scr-nest").style.display=screen==="nest"?"":"none";
+ document.getElementById("scr-stage").style.display=screen==="stage"?"":"none";
+ document.getElementById("hud").style.display=screen==="title"?"none":"";
+ if(screen==="title"){document.getElementById("subtitle").textContent="vβ";return;}
+ document.getElementById("subtitle").textContent=
+  screen==="nest"?"vβ.5":`vβ.5 — ${G?G.sd.name:""}`;
+
+ /* HUD */
+ const hud=document.getElementById("hud");
+ const cells=[["肉",Math.floor(M.meat)],["核",M.cores],["編成",`${partySlots()} / ${PARTY_MAX}`],["名簿",M.roster.length],["図鑑",`${Object.keys(M.dex).length} / 5`]];
+ if(screen==="stage"&&G){cells.length=0;cells.push(["NEST",G.nest],["WAVE",`${G.wave} / ${G.sd.waves.length}`],["魂",Math.floor(G.soul)],["地脈",Math.floor(G.ley)],["肉",Math.floor(M.meat)+(G.run&&G.run.meat?`+${Math.floor(G.run.meat)}`:"")]);}
+ hud.innerHTML=cells.map(([a,b])=>`<div class="stat"><b>${a}</b><i class="num">${b}</i></div>`).join("");
+
+ if(screen==="stage")renderStage(); else renderNest();}
+
+function renderNest(){
+ /* regions */
+ document.getElementById("firsthint").style.display=Object.keys(M.cleared).length?"none":"";
+ const rg=document.getElementById("regions");rg.innerHTML="";
+ STAGES.forEach((sd,idx)=>{
+  const done=!!M.cleared[sd.id];
+  const reqOk=sd.req.every(r=>M.cleared[r]);
+  const paid=done||!!M.opened[sd.id];
+  const open=paid||(reqOk&&M.cores>=sd.cost);
+  const b=document.createElement("button");
+  b.className="node"+(done?" done":"")+(open?"":" lock")+(M.stage===sd?" on":"");
+  let sub=sd.sub+`<br>渡り ${sd.waves.length} 波 · 巣 ${sd.nest}`;
+  if(!paid){
+   if(!reqOk)sub+=` · <span style="color:var(--blood)">先に ${sd.req.map(r=>STAGES.find(s=>s.id===r).name).join("・")} を拓く</span>`;
+   else if(M.cores<sd.cost)sub+=` · <span style="color:var(--blood)">核 ${sd.cost} が要る（いま ${M.cores}）</span>`;
+   else if(sd.cost)sub+=` · 出撃時に核 ${sd.cost} を払って拓く`;}
+  if(M.stage===sd)sub+=` · <span style="color:var(--moss)">選択中 — 下で編成して出撃</span>`;
+  b.innerHTML=`<span class="k">${M.stage===sd?"▶":done?"◉":"○"}</span><span class="m"><em>${sd.name}</em><s>${sub}</s></span>`;
+  b.disabled=!open;
+  b.onclick=()=>{
+   M.stage=sd;render();
+   window.scrollTo({top:document.getElementById("party-h").offsetTop-20,behavior:"smooth"});};
+  rg.appendChild(b);});
+
+ /* party */
+ document.getElementById("party-h").textContent=M.stage?`編成 — ${M.stage.name}へ`:"編成 — 行き先を選ぶ";
+ const pt=document.getElementById("party");pt.innerHTML="";
+ if(!M.party.length)pt.innerHTML='<div style="color:var(--faint);font-size:12px;padding:4px">下の<b style="color:var(--ink)">名簿</b>から個体を押すと、ここに入る。</div>';
+ for(const ind of M.party){
+  const b=document.createElement("button");b.className="ind on";
+  b.appendChild(mini(UNITS[ind.key].spr,26));
+  const u=document.createElement("u");
+  u.innerHTML=`<em>${ind.name}</em><s>${stateOf(ind)}</s>`;
+  b.appendChild(u);
+  b.onclick=()=>{M.party.splice(M.party.indexOf(ind),1);render();};
+  pt.appendChild(b);}
+ const note=document.getElementById("party-note");
+ const need=M.stage&&!M.cleared[M.stage.id]&&!M.opened[M.stage.id]?M.stage.cost:0;
+ note.innerHTML=`連れて行けるのは ${PARTY_MAX} 体まで（いま ${partySlots()}）。`
+  +(M.stage?`　行き先：<b style="color:var(--ink)">${M.stage.name}</b>`+(need?`（出撃時に核 ${need}）`:""):`　<span style="color:var(--blood)">行き先が未選択。上の「相」から選ぶ。</span>`)
+  +(M.party.length?"":`　<span style="color:var(--blood)">編成が空。</span>`);
+ document.getElementById("sortie").disabled=!M.stage||!M.party.length||partySlots()>PARTY_MAX||M.cores<need;
+
+ /* filters */
+ const fl=document.getElementById("filters");fl.innerHTML="";
+ const opts=[["all","すべて"],["ok","出せる"],["m","沼"],["e","焦"],["r","岩"],["evo","進化済"]];
+ for(const[k,lbl]of opts){
+  const b=document.createElement("button");b.className="filt"+(M.filter===k?" on":"");
+  b.textContent=lbl;b.onclick=()=>{M.filter=k;render();};fl.appendChild(b);}
+
+ /* roster */
+ const ro=document.getElementById("roster");ro.innerHTML="";
+ const list=M.roster.filter(ind=>{
+  const st=statOf(ind);
+  switch(M.filter){
+   case"ok":return usable(ind);
+   case"m":return st.aff.includes(MIRE);
+   case"e":return st.aff.includes(EMBER);
+   case"r":return st.aff.includes(ROCK);
+   case"evo":return !!UNITS[ind.key].evo;
+   default:return true;}});
+ if(!list.length)ro.innerHTML='<div style="color:var(--faint);font-size:12px;padding:4px">該当なし。</div>';
+ const grid=document.createElement("div");grid.className="row";
+ for(const ind of list){
+  const b=document.createElement("button");
+  const ok=usable(ind),inP=M.party.includes(ind);
+  b.className="ind"+(inP?" on":"")+(ok?"":" bad");
+  b.appendChild(mini(UNITS[ind.key].spr,26));
+  const u=document.createElement("u");
+  let sub=stateOf(ind);
+  const el=EVO[ind.key];
+  if(el){let best=null;for(const e of el){const p=evoProg(ind,e);if(!best||p.v>best.p.v)best={e,p};}
+   if(best.p.ready)sub+=" · 進化できる";
+   else if(best.p.v>.3)sub+=` · ${UNITS[best.e.to].name}へ ${Math.floor(best.p.v*100)}%`;}
+  u.innerHTML=`<em>${ind.name}</em><s>${sub}</s>`;
+  b.appendChild(u);
+  if(slotOf(ind)>1){const w=document.createElement("span");w.className="w";w.textContent=slotOf(ind);b.appendChild(w);}
+  b.onclick=()=>{
+   M.inspect=ind;
+   if(inP)M.party.splice(M.party.indexOf(ind),1);
+   else if(ok&&partySlots()+slotOf(ind)<=PARTY_MAX)M.party.push(ind);
+   else if(ok)tick(`編成は ${PARTY_MAX} 体まで。`);
+   render();};
+  grid.appendChild(b);}
+ ro.appendChild(grid);
+
+ renderDetail();
+
+ /* lines */
+ const ln=document.getElementById("lines");ln.innerHTML="";
+ let any=false;
+ for(const L of LINES){
+  if(M.known[L.key])continue;
+  any=true;
+  const b=document.createElement("button");b.className="node";
+  b.innerHTML=`<span class="k">○</span><span class="m"><em>${L.name}</em><s>${L.desc}<br>核 ${L.cost}${M.cores<L.cost?` <span style="color:var(--blood)">（いま ${M.cores}）</span>`:""}</s></span>`;
+  b.disabled=M.cores<L.cost;
+  b.onclick=()=>{if(M.cores<L.cost)return;M.cores-=L.cost;M.known[L.key]=1;
+   const i=born(L.key);M.inspect=i;autosave();render();};
+  ln.appendChild(b);}
+ if(!any)ln.innerHTML='<div style="color:var(--faint);font-size:12px;padding:4px">解放できる系統はもうない。</div>';
+
+ /* hire */
+ const hr=document.getElementById("hire");hr.innerHTML="";
+ for(const k in UNITS){
+  if(!M.known[k]||UNITS[k].evo||UNITS[k].nushi)continue;
+  const d=UNITS[k];
+  const b=document.createElement("button");b.className="ind";
+  b.appendChild(mini(d.spr,26));
+  const u=document.createElement("u");u.innerHTML=`<em>${d.name}</em><s>${d.cost} 肉 · ${d.tag}</s>`;
+  b.appendChild(u);b.disabled=M.meat<d.cost;
+  b.onclick=()=>{if(M.meat<d.cost)return;M.meat-=d.cost;const i=born(k);M.inspect=i;autosave();render();};
+  hr.appendChild(b);}
+
+ /* codex */
+ const dx=document.getElementById("codex");dx.innerHTML="";
+ for(const k in FOES){
+  const f=FOES[k],got=!!M.dex[k];
+  if(f.nushi&&!got&&!Object.keys(M.cleared).length)continue;
+  const d=document.createElement("div");d.className="dex"+(got?" got":"");
+  const c=document.createElement("canvas");c.width=c.height=22;
+  const x=c.getContext("2d");x.imageSmoothingEnabled=false;
+  x.globalAlpha=got?1:.25;x.drawImage(SPR[f.spr],0,0,22,22);
+  d.appendChild(c);
+  const s=document.createElement("span");
+  s.textContent=got?f.name:(f.nushi?`${f.name}／膝をつかせて従える`:`${f.name}／${TERRAIN[f.likes].name}を好む${f.climbs?"・岩場を越える":""}${f.fly?"・飛ぶ":""}`);
+  d.appendChild(s);dx.appendChild(d);}}
+
+function renderDetail(){
+ const dt=document.getElementById("dtrack"),dv=document.getElementById("detail");
+ const ins=M.inspect;
+ if(!ins||!M.roster.includes(ins)){dt.style.display="none";return;}
+ dt.style.display="";
+ const st=statOf(ins),d=UNITS[ins.key];
+ const affs=st.aff.map(a=>TERRAIN[a].name).join("・");
+ const sc=ins.scars.map(x=>SCARS[x].name+"（"+SCARS[x].note+"）").join(" / ")||"なし";
+ let h=`<h4>${ins.name}</h4>
+  <div style="color:var(--dim)">${d.tag} · 体力 ${ins.max} · 攻撃 ${st.dmg.toFixed(1)} · 射程 ${Math.round(st.rng)}</div>
+  <div style="color:var(--dim)">適性 ${affs}${st.terra!==null?" · "+TERRAIN[st.terra].name+"を広げる":""}</div>
+  <div style="color:var(--dim)">状態 ${stateOf(ins)} · 傷跡 ${sc}</div><hr>`;
+ for(const t of[MIRE,EMBER,ROCK]){
+  const v=ins.adapt[t]||0,pc=Math.min(100,v/120*100),got=v>=ADAPT_AFF;
+  h+=`<div class="met"><u>${TERRAIN[t].name}</u><span class="bar"><i style="width:${pc}%;background:${got?"#7FB04A":"#6B6052"}"></i><span class="mark" style="left:${ADAPT_AFF/120*100}%"></span></span><span class="val">${Math.floor(v)}${got?" 順応":""}</span></div>`;}
+ h+=`<div style="color:var(--faint);font-size:11px;margin-top:4px">縦線が順応の境。越えるとその地形が適性になる。</div><hr>
+  <div style="color:var(--dim)">倒した数 ${ins.rec.kills} · 与えた傷 ${Math.round(ins.rec.dmg)} · 負った傷 ${Math.round(ins.rec.taken)}</div>`;
+ const list=EVO[ins.key];
+ if(list){
+  h+=`<hr><div style="color:var(--faint);font-size:11px;letter-spacing:.14em">兆候</div>`;
+  list.forEach((e,idx)=>{
+   const p=evoProg(ins,e);
+   h+=`<div style="margin:6px 0"><b>${UNITS[e.to].name}</b> — ${UNITS[e.to].tag}
+    <div class="met"><u>${TERRAIN[e.ter].name}</u><span class="bar"><i style="width:${p.a*100}%;background:${p.a>=1?"#7FB04A":"#6B6052"}"></i></span><span class="val">${Math.floor(ins.adapt[e.ter]||0)}/${e.tn}</span></div>
+    <div class="met"><u>${STATLBL[e.st]}</u><span class="bar"><i style="width:${p.b*100}%;background:${p.b>=1?"#7FB04A":"#6B6052"}"></i></span><span class="val">${Math.round(ins.rec[e.st])}/${e.sn}</span></div>
+    <button class="ev" data-evo="${idx}" ${p.ready?"":"disabled"}>${p.ready?"この形へ進化させる":"条件が足りない"}</button></div>`;});}
+ else h+=`<hr><div style="color:var(--faint)">これ以上は変わらない。</div>`;
+ if(screen==="nest")h+=`<hr><button class="rel">放逐する（肉 +${Math.round((d.cost||60)*.5)}）</button>`;
+ dv.innerHTML=h;
+ dv.querySelectorAll("button.ev").forEach(b=>{
+  b.onclick=()=>{const e=EVO[ins.key][+b.dataset.evo];if(evoProg(ins,e).ready)evolve(ins,e);};});
+ const rel=dv.querySelector("button.rel");
+ if(rel)rel.onclick=()=>{
+  askConfirm("放逐する",`${ins.name}を群れから外す。戻らない。肉 +${Math.round((d.cost||60)*.5)}。`,"放逐する",()=>{
+   M.meat+=Math.round((d.cost||60)*.5);
+   const pi=M.party.indexOf(ins);if(pi>=0)M.party.splice(pi,1);
+   M.roster.splice(M.roster.indexOf(ins),1);M.inspect=null;autosave();render();});};}
+
+function renderStage(){
+ const dk=document.getElementById("dock");dk.innerHTML="";
+ for(const ind of M.party){
+  const onField=G.units.find(u=>u.ind===ind);
+  const b=document.createElement("button");
+  b.className="ind"+(G.picked===ind?" on":"")+(ind.down?" bad":"");
+  b.appendChild(mini(UNITS[ind.key].spr,26));
+  const u=document.createElement("u");
+  const cost=soulCost(ind);
+  let sub=ind.down?"倒れた":onField?"場に出ている":`魂 ${cost} で出す`;
+  u.innerHTML=`<em>${ind.name}</em><s>${sub}</s>
+   <span class="hpb"><i style="width:${Math.max(0,ind.hp/ind.max*100)}%"></i></span>`;
+  b.appendChild(u);
+  b.disabled=ind.down;
+  b.onclick=()=>{
+   M.inspect=ind;
+   if(onField){G.sel=onField;tick(`<b>${ind.name}</b>を選んだ。空きマスで移住、「撤収」で引き戻す。`);}
+   else{G.picked=G.picked===ind?null:ind;G.act=null;G.sel=null;
+    if(G.picked)tick(`出す場所を選べ。適性は ${statOf(ind).aff.map(a=>TERRAIN[a].name).join("・")}。`);}
+   render();};
+  dk.appendChild(b);}
+
+ const ar=document.getElementById("acts");ar.innerHTML="";
+ for(const k in ACTS){
+  const a=ACTS[k];
+  const b=document.createElement("button");b.className="act"+(G.act===k?" sel":"");
+  b.innerHTML=`${a.name}<s>${a.sub}</s>`;b.disabled=G.ley<a.cost;
+  b.onclick=()=>{G.act=G.act===k?null:k;G.picked=null;G.sel=null;
+   if(G.act)tick(`${a.name}するマスを選べ。`);render();};
+  ar.appendChild(b);}
+ const rb=document.createElement("button");rb.className="act";
+ rb.innerHTML=`撤収<s>魂が半分戻る</s>`;rb.disabled=!G.sel;
+ rb.onclick=()=>{if(G.sel)recall(G.sel);render();};
+ ar.appendChild(rb);
+
+ const go=document.getElementById("go");
+ go.disabled=G.running||G.over||G.wave>=G.sd.waves.length;
+ go.textContent=G.wave===0?"最初の渡りを迎える":G.running?`第 ${G.wave} の渡り、来ている`:`第 ${G.wave+1} の渡りを迎える`;}
+
+/* ================= wiring ================= */
+document.getElementById("sortie").onclick=()=>{
+ if(!M.stage||!M.party.length)return;
+ const sd=M.stage;
+ if(!M.cleared[sd.id]&&!M.opened[sd.id]&&sd.cost){
+  if(M.cores<sd.cost)return;
+  M.cores-=sd.cost;M.opened[sd.id]=1;}
+ autosave();startStage(sd);};
+document.getElementById("go").onclick=startWave;
+document.getElementById("msg-b2").onclick=()=>{
+ if(G&&G.retreating)doRetreat();else toNest();
+ document.getElementById("msg-b2").textContent="巣へ戻る";};
+function doRetreat(){
+ for(const i of M.party){i.fatigue=Math.min(FATIGUE_MAX,i.fatigue+1);if(i.down)i.rest=WOUND_REST;i.hp=i.max;i.down=false;}
+ const m=document.getElementById("msg");m.classList.remove("on");
+ autosave();toNest();}
+document.getElementById("retreat").onclick=()=>{
+ if(!G||G.over)return;
+ G.over=true;G.running=false;
+ const m=document.getElementById("msg");
+ document.getElementById("msg-t").textContent="巣へ退く";
+ document.getElementById("msg-b").textContent="この相の成果は失われるが、群れは無事に持ち帰る。倒れていた個体は療養に入る。";
+ document.getElementById("msg-b2").textContent="巣へ戻る";
+ m.classList.add("on");
+ G.retreating=true;};
+
+/* ---------- title art ---------- */
+document.getElementById("title-art").innerHTML=`
+<svg viewBox="0 0 520 150" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:auto">
+ <defs><linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#17140F"/><stop offset="1" stop-color="#221D16"/></linearGradient></defs>
+ <rect width="520" height="150" fill="url(#sky)"/>
+ <g opacity="0.9">
+  <path d="M0 150 L0 96 Q70 84 140 92 T280 88 T420 96 T520 90 L520 150 Z" fill="#31584A"/>
+  <path d="M0 150 L0 116 Q90 108 180 118 T360 112 T520 120 L520 150 Z" fill="#26463B"/>
+  <path d="M170 150 L210 108 L250 150 Z" fill="#565C64"/>
+  <path d="M150 150 L188 116 L226 150 Z" fill="#41464D"/>
+  <path d="M300 150 Q330 120 360 150 Z" fill="#6B3120"/>
+  <circle cx="360" cy="128" r="3" fill="#E0722C"/><circle cx="372" cy="134" r="2" fill="#F0913A"/>
+ </g>
+ <g fill="none" stroke="#7FB04A" stroke-width="1" opacity="0.5" stroke-dasharray="2 5">
+  <circle cx="95" cy="104" r="20"/><circle cx="255" cy="100" r="24"/></g>
+ <circle cx="95" cy="104" r="4" fill="#4C8B5A"/><circle cx="255" cy="100" r="4" fill="#8FBF5A"/>
+ <text x="260" y="56" text-anchor="middle" font-family="system-ui,sans-serif" font-size="34" font-weight="600" letter-spacing="10" fill="#E8E0CE">LIVING</text>
+ <text x="260" y="90" text-anchor="middle" font-family="system-ui,sans-serif" font-size="34" font-weight="600" letter-spacing="8" fill="#7FB04A">TERRAIN</text>
+</svg>`;
+
+/* ---------- modal ---------- */
+const modal=document.getElementById("modal");
+function openModal(title,desc,text,okLabel,onOk,readonly){
+ document.getElementById("modal-t").textContent=title;
+ document.getElementById("modal-d").textContent=desc;
+ const x=document.getElementById("modal-x");x.value=text||"";x.readOnly=!!readonly;x.style.display="";
+ document.getElementById("modal-cancel").textContent="閉じる";
+ const ok=document.getElementById("modal-ok");ok.textContent=okLabel;
+ ok.onclick=()=>{onOk(x.value);};
+ modal.classList.add("on");
+ if(!readonly)setTimeout(()=>x.focus(),50); else{x.focus();x.select();}}
+document.getElementById("modal-cancel").onclick=()=>modal.classList.remove("on");
+function askConfirm(title,desc,okLabel,onYes){
+ document.getElementById("modal-t").textContent=title;
+ document.getElementById("modal-d").textContent=desc;
+ const x=document.getElementById("modal-x");x.value="";x.style.display="none";
+ const ok=document.getElementById("modal-ok");ok.textContent=okLabel;
+ ok.onclick=()=>{modal.classList.remove("on");x.style.display="";onYes();};
+ document.getElementById("modal-cancel").textContent="やめる";
+ modal.classList.add("on");}
+function notice(title,desc){
+ document.getElementById("modal-t").textContent=title;
+ document.getElementById("modal-d").textContent=desc;
+ const x=document.getElementById("modal-x");x.value="";x.style.display="none";
+ const ok=document.getElementById("modal-ok");ok.textContent="閉じる";
+ ok.onclick=()=>{modal.classList.remove("on");x.style.display="";};
+ document.getElementById("modal-cancel").textContent="閉じる";
+ modal.classList.add("on");}
+
+function doSave(){
+ const code=encode();
+ if(LS_OK){autosave();
+  openModal("セーブ","このブラウザには自動保存済み。下の文字列を控えておけば、別環境やリセット後にも復元できる。",
+   code,"コピー",v=>{navigator.clipboard&&navigator.clipboard.writeText(v);
+    document.getElementById("modal-ok").textContent="コピーした";},true);}
+ else openModal("セーブ","この環境は自動保存が使えない。下の文字列を全部コピーして保管し、次回タイトルの「復元」で貼り戻す。",
+   code,"コピー",v=>{navigator.clipboard&&navigator.clipboard.writeText(v);
+    document.getElementById("modal-ok").textContent="コピーした";},true);}
+
+function refreshTitle(){
+ document.getElementById("t-continue").style.display=hasSave()?"":"none";}
+
+/* ---------- title buttons ---------- */
+function startFresh(){
+ M=newMeta();born("numa");born("numa");born("hino");born("iwa");
+ screen="nest";autosave();render();window.scrollTo(0,0);}
+document.getElementById("t-new").onclick=()=>{
+ if(hasSave())askConfirm("新しく始める","このブラウザの自動保存が上書きされる。続きから遊ぶ場合は「やめる」を押して『続きから』へ。","新しく始める",startFresh);
+ else startFresh();};
+document.getElementById("t-continue").onclick=()=>{
+ if(loadAuto()){screen="nest";render();window.scrollTo(0,0);}
+ else notice("読み込めない","保存データを読み取れなかった。壊れているかもしれない。");};
+document.getElementById("t-load").onclick=()=>{
+ openModal("復元","セーブ文字列を貼り付けて復元する。",
+  "","復元する",v=>{const o=decode(v);
+   if(o&&deserialize(o)){modal.classList.remove("on");screen="nest";autosave();render();window.scrollTo(0,0);}
+   else notice("読み込めない","セーブ文字列を読み取れなかった。全文が貼れているか確かめてほしい。");},false);};
+
+document.getElementById("n-save").onclick=doSave;
+document.getElementById("n-title").onclick=()=>{
+ autosave();screen="title";refreshTitle();render();window.scrollTo(0,0);};
+document.getElementById("subtitle").onclick=()=>{
+ if(screen==="nest"){autosave();screen="title";refreshTitle();render();window.scrollTo(0,0);}};
+
+/* ---------- boot ---------- */
+M=newMeta();
+refreshTitle();
+render();
+let last=performance.now();
+(function loop(now){
+ const dt=Math.min(.05,(now-last)/1000);last=now;
+ if(screen==="stage")step(dt);
+ draw();requestAnimationFrame(loop);})(performance.now());
+</script>
