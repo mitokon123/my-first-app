@@ -1,0 +1,21 @@
+/* style.css : 画面まわりの最小限のスタイル。ゲーム本体は Canvas に描画する。 */
+html, body {
+  margin: 0;
+  padding: 0;
+  background: #05070d;
+  color: #e8eaf0;
+  font-family: monospace;
+}
+
+#app {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+}
+
+#game {
+  background: #000;
+  border: 2px solid #2a3350;
+  image-rendering: pixelated; /* ドット絵をくっきり表示する */
+}

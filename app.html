@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-store">
+  <title>ABYSS CHRONICLE - Monstoria</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div id="app">
+    <!-- 実際のサイズは data/config.js の canvasWidth / canvasHeight で設定される -->
+    <canvas id="game" width="800" height="600"></canvas>
+  </div>
+
+  <!--
+    ▼ 読み込みについて
+
+    ES6モジュールは使わず <script> で読み込む（file:// でのダブルクリック起動優先）。
+    ただし通常の <script src="..."> だと、ブラウザが古いファイルを使い回してしまい、
+    「一部だけ古い処理が動く」という分かりにくい不具合が起きる。
+
+    そのためファイル名のうしろに読み込みごとに変わる印を付けて、
+    必ず最新のファイルが読まれるようにしている。
+
+    順序は下の配列のとおり。async = false により、書いた順に実行される。
+      1) 名前空間  2) データ  3) コア  4) 部品  5) シーン  6) 起動
+  -->
+  <script>
+  (function () {
+    "use strict";
+
+    var files = [
+      // 1) 唯一のグローバル名前空間
+      "js/namespace.js",
+
+      // 2) データ（MyGame.rawData へ登録）
+      "data/config.js",
+      "data/growth.js",
+      "data/natures.js",
+      "data/categories.js",
+      "data/elements.js",
+      "data/skills.js",
+      "data/abilities.js",
+      "data/items.js",
+      "data/monsters.js",
+      "data/enemies.js",
+      "data/bosses.js",
+      "data/dungeons.js",
+      "data/battle.js",
+      "data/scout.js",
+      "data/run.js",
+      "data/shop.js",
+      "data/recipes.js",
+      "data/blessings.js",
+      "data/patchnotes.js",
+      "data/player.js",
+      "data/save.js",
+      "data/keys.js",
+      "data/settings.js",
+      "data/ui.js",
+      "data/messages.js",
+      "data/dungeon.js",
+      "data/features.js",
+      "data/sprites.js",
+
+      // 3) コア
+      "js/core/GameData.js",
+      "js/core/DataLoader.js",
+      "js/core/AssetLoader.js",
+      "js/core/Random.js",
+      "js/core/Input.js",
+      "js/core/GameLoop.js",
+      "js/core/SceneManager.js",
+      "js/core/Game.js",
+
+      // 4) 描画・ダンジョン・エンティティ
+      "js/render/Renderer.js",
+      "js/render/SpriteRenderer.js",
+      "js/dungeon/Dungeon.js",
+      "js/dungeon/DungeonGenerator.js",
+      "js/entities/Player.js",
+      "js/entities/MonsterData.js",
+      "js/entities/MonsterInstance.js",
+      "js/entities/Party.js",
+      "js/entities/MonsterStorage.js",
+      "js/entities/Inventory.js",
+
+      // 5) システム
+      "js/systems/EncounterSystem.js",
+      "js/systems/SaveManager.js",
+      "js/systems/SettingsManager.js",
+      "js/systems/Discovery.js",
+      "js/systems/ItemUsage.js",
+      "js/systems/DropSystem.js",
+      "js/systems/AbilitySystem.js",
+      "js/systems/EffectSystem.js",
+      "js/systems/DungeonCatalog.js",
+      "js/systems/RunSession.js",
+      "js/systems/FeatureSystem.js",
+      "js/systems/ShopSystem.js",
+      "js/systems/CraftSystem.js",
+      "js/systems/BlessingSystem.js",
+      "js/battle/BattleSystem.js",
+      "js/battle/BattleMessageFormatter.js",
+      "js/battle/BattleAnimator.js",
+      "js/scout/ScoutSystem.js",
+
+      // 6) UI部品
+      "js/ui/Panel.js",
+      "js/ui/HpBar.js",
+      "js/ui/MessageLog.js",
+      "js/ui/CommandMenu.js",
+      "js/ui/MonsterStatusBox.js",
+      "js/ui/ParticleField.js",
+      "js/ui/ScrollList.js",
+      "js/ui/BackButton.js",
+      "js/ui/FloatingText.js",
+      "js/ui/ScreenEffects.js",
+
+      // 7) シーン
+      "js/scenes/TitleScene.js",
+      "js/scenes/PatchNoteScene.js",
+      "js/scenes/DungeonSelectScene.js",
+      "js/scenes/DungeonScene.js",
+      "js/scenes/BattleScene.js",
+      "js/scenes/BlessingScene.js",
+      "js/scenes/HomeScene.js",
+      "js/scenes/SettingsScene.js",
+      "js/scenes/ShopScene.js",
+      "js/scenes/CraftScene.js",
+      "js/scenes/ItemScene.js",
+      "js/scenes/DexScene.js",
+      "js/scenes/PartyScene.js",
+      "js/scenes/EndingScene.js",
+
+      // 8) 起動
+      "js/main.js"
+    ];
+
+    // 読み込みごとに変わる印。これがあると古いファイルが使い回されない。
+    // 公開時に読み込みを速くしたい場合は、固定の文字列（"v1" など）に変えてよい。
+    var cacheBuster = "?t=" + Date.now();
+
+    for (var i = 0; i < files.length; i++) {
+      var script = document.createElement("script");
+      script.src = files[i] + cacheBuster;
+      script.async = false;   // 配列の順番どおりに実行させる
+      document.head.appendChild(script);
+    }
+  })();
+  </script>
+</body>
+</html>
