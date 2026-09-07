@@ -41,6 +41,7 @@
       "data/categories.js",
       "data/elements.js",
       "data/skills.js",
+      "data/statuses.js",
       "data/abilities.js",
       "data/items.js",
       "data/monsters.js",
@@ -49,11 +50,13 @@
       "data/dungeons.js",
       "data/battle.js",
       "data/scout.js",
+      "data/naming.js",
       "data/run.js",
       "data/shop.js",
       "data/recipes.js",
       "data/blessings.js",
       "data/patchnotes.js",
+      "data/home.js",
       "data/player.js",
       "data/save.js",
       "data/keys.js",
@@ -61,8 +64,15 @@
       "data/ui.js",
       "data/messages.js",
       "data/dungeon.js",
+      "data/dungeonThemes.js",
       "data/features.js",
+      // 絵は用途と地方で分けてある（data/sprites.js の説明を参照）
       "data/sprites.js",
+      "data/sprites_features.js",
+      "data/sprites_abyss.js",
+      "data/sprites_ui.js",
+      "data/motions.js",
+      "data/effects.js",
 
       // 3) コア
       "js/core/GameData.js",
@@ -107,6 +117,12 @@
       "js/scout/ScoutSystem.js",
 
       // 6) UI部品
+      "js/ui/Motion.js",
+      "js/ui/MotionPlayer.js",
+      "js/ui/SkillEffect.js",
+      "js/ui/EffectPlayer.js",
+      "js/ui/Notice.js",
+      "js/ui/Fade.js",
       "js/ui/Panel.js",
       "js/ui/HpBar.js",
       "js/ui/MessageLog.js",
@@ -114,7 +130,9 @@
       "js/ui/MonsterStatusBox.js",
       "js/ui/ParticleField.js",
       "js/ui/ScrollList.js",
+      "js/ui/TextButton.js",
       "js/ui/BackButton.js",
+      "js/ui/NameInput.js",
       "js/ui/FloatingText.js",
       "js/ui/ScreenEffects.js",
 
@@ -129,9 +147,11 @@
       "js/scenes/SettingsScene.js",
       "js/scenes/ShopScene.js",
       "js/scenes/CraftScene.js",
+      "js/scenes/BlessingSelectScene.js",
       "js/scenes/ItemScene.js",
       "js/scenes/DexScene.js",
       "js/scenes/PartyScene.js",
+      "js/scenes/ResultScene.js",
       "js/scenes/EndingScene.js",
 
       // 8) 起動

@@ -19,9 +19,13 @@
     this.game = game;
     this.renderer = new NS.Renderer(game.ctx);
     this.sprites = new NS.SpriteRenderer(game.ctx, game.assets);
+    this.panel = new NS.Panel(game.ctx, (game.data.ui || {}).theme || {});
 
     // どのダンジョンに挑んでいるか。指定が無ければ最初の1つ
     this.definition = dungeonDef || firstDungeon(game.data);
+
+    // 見た目（色と床の飾り）。theme を書いていないダンジョンは既定の色になる
+    this.theme = ((game.data.dungeonThemes || {})[this.definition && this.definition.theme]) || {};
 
     this.random = new NS.Random();
     this.player = new NS.Player(0, 0);
@@ -33,10 +37,26 @@
     this.saveManager = new NS.SaveManager(game.data);
 
     this.placedFeatures = []; // この階層に置かれた仕掛け（宝箱・泉・罠）
+    this.decorations = [];    // この階層の床の飾り（見た目だけ。当たり判定なし）
 
     this._moveTimer = 0;  // 次に動けるまでの残り時間（ms）
-    this._notice = null;  // 画面に一時表示する通知（セーブ結果など）
-    this._noticeTimer = 0;
+    // 画面に一時表示する知らせ（セーブ結果・拾ったものなど）
+    this.notice = new NS.Notice(((game.data.ui || {}).theme || {}).notice);
+    // 階を降りるときの暗転（画面は変わらないので自分で行う）
+    this.fade = new NS.Fade(((game.data.ui || {}).dungeon || {}).stairFade);
+
+    // マウスだけでも仲間と持ち物を開けるようにする（キーの P / I と同じ）
+    var dungeonUi = (game.data.ui || {}).dungeon || {};
+    var dungeonTexts = (game.data.messages || {}).dungeon || {};
+    var buttons = dungeonUi.buttons || {};
+    this.partyButton = new NS.TextButton(this.panel, buttons.party,
+      dungeonTexts.buttonParty || "仲間");
+    this.itemsButton = new NS.TextButton(this.panel, buttons.items,
+      dungeonTexts.buttonItems || "持ち物");
+
+    // 出している問いかけ（聞いている間は移動できない）。
+    // 仕掛けを使うか・階段で降りるかなど、その場で決めることに使い回す
+    this._prompt = null;
 
     if (savedState) this._restore(savedState);
     else {
@@ -49,6 +69,41 @@
   function firstDungeon(gameData) {
     var list = NS.DungeonCatalog ? NS.DungeonCatalog.list(gameData) : [];
     return list[0] || null;
+  }
+
+  /** 重み付きで1つ選ぶ（床の飾りの抽選に使う） */
+  function pickWeighted(entries, random) {
+    var total = 0, i;
+    for (i = 0; i < entries.length; i++) total += (entries[i].weight || 0);
+    if (total <= 0) return entries[0] || null;
+
+    var roll = random.next() * total;
+    for (i = 0; i < entries.length; i++) {
+      roll -= (entries[i].weight || 0);
+      if (roll <= 0) return entries[i];
+    }
+    return entries[entries.length - 1];
+  }
+
+  /** base に override の項目をかぶせた新しいオブジェクトを返す */
+  function merge(base, override) {
+    var result = {};
+    var key;
+    for (key in base) {
+      if (Object.prototype.hasOwnProperty.call(base, key)) result[key] = base[key];
+    }
+    for (key in override) {
+      if (Object.prototype.hasOwnProperty.call(override, key)) result[key] = override[key];
+    }
+    return result;
+  }
+
+  /** そのマスが一覧に含まれているか */
+  function occupied(list, col, row) {
+    for (var i = 0; i < (list || []).length; i++) {
+      if (list[i] && list[i].col === col && list[i].row === row) return true;
+    }
+    return false;
   }
 
   /** このダンジョンの最深階（ボスがいる階） */
@@ -69,6 +124,8 @@
       this.dungeon = new NS.Dungeon(state.dungeon.rows, def.tiles, this.game.data.config.tileSize);
       this.rooms = [];
       this.player.setPosition(state.dungeon.playerCol, state.dungeon.playerRow);
+      // 飾りは見た目だけなので保存しない。開いたときに撒き直す
+      this._placeDecorations([{ col: this.player.col, row: this.player.row }]);
     } else {
       // マップが保存されていない場合は生成し直す
       this._generate();
@@ -102,8 +159,56 @@
     // 仕掛けは開始位置と階段を避けて置く（いきなり罠を踏まないように）
     this.placedFeatures = this.features.place(this.dungeon, [start]);
 
+    // 飾りは仕掛けの上に重ならないように置く（宝箱を隠してしまわないため）
+    this._placeDecorations([start].concat(this.placedFeatures));
+
     // 敵の出方は階ごとに変わる（data/dungeons.js の perFloor）
     this.encounters.setFloor(this.floor);
+  };
+
+  /**
+   * 床の飾りを撒く。効果も当たり判定も持たない、見た目だけのもの。
+   * 何をいくつ置くかは data/dungeonThemes.js の decorations が決める。
+   * @param {Array<{col:number,row:number}>} avoid 置きたくないマス
+   */
+  DungeonScene.prototype._placeDecorations = function (avoid) {
+    this.decorations = [];
+
+    var settings = this.theme.decorations;
+    var table = (settings && settings.table) || [];
+    if (table.length === 0) return;
+
+    var count = (settings.count || {});
+    var lo = (count.min === undefined) ? 0 : count.min;
+    var hi = (count.max === undefined) ? lo : count.max;
+    var n = this.random.nextInt(lo, Math.max(lo, hi));
+
+    // 階段のマスにも置かない（記号が読めなくなるため）
+    for (var i = 0; i < n; i++) {
+      var spot = this._findDecorationSpot(avoid);
+      if (!spot) break;
+
+      var entry = pickWeighted(table, this.random);
+      if (!entry || !entry.sprite) continue;
+
+      this.decorations.push({ col: spot.col, row: spot.row, sprite: entry.sprite });
+      avoid = avoid.concat([spot]);   // 同じマスに重ねない
+    }
+  };
+
+  /** 飾りを置ける床マスを1つ探す（見つからなければ null） */
+  DungeonScene.prototype._findDecorationSpot = function (avoid) {
+    for (var i = 0; i < 30; i++) {
+      var spot = this.dungeon.randomFloor(this.random);
+      if (!spot) return null;
+
+      var tile = this.dungeon.tileAt(spot.col, spot.row);
+      if (tile && tile.stairs) continue;
+      if (occupied(avoid, spot.col, spot.row)) continue;
+
+      return spot;
+    }
+    return null;
   };
 
   /** 開始位置を決める（階段のマスは避ける） */
@@ -136,6 +241,8 @@
       gold: this.game.gold,
       discovery: this.game.discovery,
       clearedDungeons: this.game.clearedDungeons,
+      boughtBlessings: this.game.boughtBlessings,
+      offBlessings: this.game.offBlessings,
       dungeon: {
         rows: this.dungeon.rows,
         playerCol: this.player.col,
@@ -149,17 +256,36 @@
 
   /** 画面下部に一定時間だけ通知を表示する */
   DungeonScene.prototype._showNotice = function (text) {
-    this._notice = text;
-    this._noticeTimer = NOTICE_DURATION;
+    this.notice.show(text, NOTICE_DURATION);
   };
 
   DungeonScene.prototype.update = function (dt) {
     var input = this.game.input;
 
-    // 通知の表示時間を減らす
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
+    this.notice.update(dt);
+
+    // 見た目の位置を、本当の位置へ近づける（マス間を滑らせる）
+    var L = (this.game.data.ui || {}).dungeon || {};
+    this.player.updateView(dt, L.playerMoveDuration);
+
+    // 階を降りている最中は操作を受け付けない
+    this.fade.update(dt);
+    if (this.fade.isActive()) return;
+
+    // 問いかけを出している間は、それだけを操作する
+    if (this._prompt) {
+      this._updatePrompt(input);
+      return;
+    }
+
+    // 地図に重ねたボタン。キーと同じ働きをする
+    if (this.partyButton.handleInput(input)) {
+      this._openParty();
+      return;
+    }
+    if (this.itemsButton.handleInput(input)) {
+      this._openItems();
+      return;
     }
 
     // F でセーブ
@@ -168,25 +294,36 @@
       return;
     }
 
-    // P / Tab でパーティ編成画面へ
-    if (input.isPressed("party")) {
-      this.game.scenes.change(new NS.PartyScene(this.game, this));
-      return;
-    }
+    if (input.isPressed("party")) { this._openParty(); return; }
+    if (input.isPressed("items")) { this._openItems(); return; }
 
-    // Esc / X で拠点へ戻る（自分の足で帰るので、拾ったものは持ち帰れる）
+    // 帰れるのは階段の上か、帰還の石を使ったときだけ。
+    // どこからでも帰れると、危なくなったら必ず逃げ切れてしまう
     if (input.isPressed("cancel")) {
-      this._returnToHome(true);
-      return;
-    }
-
-    // R でマップを作り直す（生成の確認用。階層移動は今後の実装で置き換える）
-    if (input.isPressed("regenerate")) {
-      this._generate();
+      this._showNotice(((this.game.data.messages || {}).dungeon || {}).cannotLeave);
       return;
     }
 
     this._updateMovement(dt, input);
+  };
+
+  /**
+   * 仲間の画面へ。
+   * 探索中は拠点の預かり所へ手が届かないので、その表は出さない。
+   */
+  DungeonScene.prototype._openParty = function () {
+    this.game.scenes.change(new NS.PartyScene(this.game, this, { allowStorage: false }));
+  };
+
+  /**
+   * 持ち物の画面へ。ここで使えるのは usableIn に "dungeon" を書いたものだけ。
+   * 帰還の石を使ったときは、そのまま拠点へ引き上げる。
+   */
+  DungeonScene.prototype._openItems = function () {
+    var self = this;
+    this.game.scenes.change(new NS.ItemScene(this.game, this, "dungeon", function () {
+      self._returnToHome(true);
+    }));
   };
 
   // 入力から移動方向を決め、間隔(MOVE_DELAY)ごとに1歩進める
@@ -235,27 +372,144 @@
     var feature = this.features.findAt(this.placedFeatures, this.player.col, this.player.row);
     if (!feature) return false;
 
+    // 泉のように「使うか」を選べる仕掛けは、ここでは実行せず問いかけだけ出す
+    if (this.features.needsConfirm(feature)) {
+      this._beginFeatureConfirm(feature);
+      return true;
+    }
+
+    this._resolveFeature(feature);
+    return true;
+  };
+
+  /** 仕掛けを実行し、結果を通知する */
+  DungeonScene.prototype._resolveFeature = function (feature) {
     var messages = this.features.resolve(feature, this.game);
     if (messages.length > 0) this._showNotice(messages.join("　"));
-    return true;
+  };
+
+  /**
+   * 「使うか / やめておくか」を聞き始める。
+   * やめておいた仕掛けは使われないまま残るので、あとで戻ってくれば使える。
+   */
+  DungeonScene.prototype._beginFeatureConfirm = function (feature) {
+    var self = this;
+
+    this._openPrompt(this.features.getPrompt(feature),
+      this.features.getConfirmChoices(),
+      function (choice) {
+        if (choice === true) self._resolveFeature(feature);
+        else self._showNotice(self.features.getSkipMessage(feature));
+      });
+  };
+
+  // --- その場で決めてもらう問いかけ ---
+
+  /**
+   * 問いかけを出す。返事があるまで移動できない。
+   *
+   * 仕掛けを使うか、階段で降りるか、といった「その場の判断」に使い回す。
+   *
+   * @param {string} text 問いかけ（"\n" で改行できる）
+   * @param {Array<{label:string, value:*}>} items 選択肢
+   * @param {function} onChoose 選ばれた value を受け取る。取り消しなら null
+   */
+  DungeonScene.prototype._openPrompt = function (text, items, onChoose) {
+    var lines = (text || "").split("\n");
+    var rects = this._promptRects(lines.length, items.length);
+
+    var menu = new NS.CommandMenu(this.panel, rects.menu);
+    menu.setItems(items);
+
+    this._prompt = { lines: lines, rect: rects.text, menu: menu, onChoose: onChoose };
+
+    // 問いかけが読めるように、出しっぱなしの知らせは消しておく
+    this.notice.clear();
+  };
+
+  /**
+   * 問いかけの窓の大きさを、中身の量から決める。
+   *
+   * 高さを決め打ちにすると、選択肢が増えたときに文字がはみ出す。
+   * 行数から計算しておけば、選択肢がいくつでも収まる。
+   */
+  DungeonScene.prototype._promptRects = function (lineCount, itemCount) {
+    var P = ((this.game.data.ui || {}).dungeon || {}).prompt || {};
+    var x = (P.x === undefined) ? 236 : P.x;
+    var y = (P.y === undefined) ? 168 : P.y;
+    var w = P.w || 330;
+    var lineHeight = P.lineHeight || 20;
+    var menuLineHeight = P.menuLineHeight || 26;
+    var padding = this._panelPadding();
+
+    var textHeight = padding * 2 + lineHeight * Math.max(1, lineCount);
+    var menuTop = y + textHeight + (P.gap || 10);
+
+    return {
+      text: { x: x, y: y, w: w, h: textHeight, lineHeight: lineHeight },
+      menu: { x: x, y: menuTop, w: w, lineHeight: menuLineHeight,
+              h: padding * 2 + menuLineHeight * Math.max(1, itemCount) }
+    };
+  };
+
+  /** 枠の内側の余白（Panel と同じ値を使う） */
+  DungeonScene.prototype._panelPadding = function () {
+    var theme = ((this.game.data.ui || {}).theme) || {};
+    return theme.padding || 10;
+  };
+
+  /**
+   * 問いかけへの返事を処理する。
+   * キャンセル（Esc / 右クリック）は「決めなかった」扱いで null を渡す。
+   */
+  DungeonScene.prototype._updatePrompt = function (input) {
+    var action = this._prompt.menu.handleInput(input);
+    if (!action) return;
+
+    var onChoose = this._prompt.onChoose;
+    this._prompt = null;   // 先に閉じる（呼び先が画面を切り替えても壊れない）
+
+    if (onChoose) onChoose(action.type === "confirm" ? action.value : null);
   };
 
   /**
    * 階段を踏んだときの処理。
-   * ボスがいる階層ならボス戦、いなければ次の階層へ進む。
+   *
+   * 階段は「ここまでで切り上げる」ことを決められる唯一の場所なので、
+   * 降りるか帰るかをその場で選ばせる。最深階では、主に挑むかどうかになる。
    */
   DungeonScene.prototype._onStairs = function () {
+    var self = this;
     var boss = this._getBossForFloor(this.floor);
+    var texts = (this.game.data.messages || {}).dungeon || {};
+
     if (boss) {
-      this._startBossBattle(boss);
+      this._openPrompt(texts.bossPrompt, [
+        { label: texts.choiceFight || "挑む", value: "go" },
+        { label: texts.choiceReturn || "戻る", value: "home" },
+        { label: texts.choiceStay || "やめる", value: "stay" }
+      ], function (choice) {
+        if (choice === "go") self._startBossBattle(boss);
+        else if (choice === "home") self._returnToHome(true);
+      });
       return;
     }
-    this._descend();
+
+    this._openPrompt(texts.stairsPrompt, [
+      { label: texts.choiceDescend || "降りる", value: "go" },
+      { label: texts.choiceReturn || "戻る", value: "home" },
+      { label: texts.choiceStay || "やめる", value: "stay" }
+    ], function (choice) {
+      // いったん暗くしてから次の階を作る。作り替わる瞬間は見えない
+      if (choice === "go") self.fade.start(function () { self._descend(); });
+      else if (choice === "home") self._returnToHome(true);
+    });
   };
 
   /** 次の階層へ進む */
   DungeonScene.prototype._descend = function () {
     this.floor++;
+    if (this.game.run) this.game.run.recordFloor(this.floor);
     this._generate();
     this.encounters.resetGrace();
 
@@ -281,7 +535,8 @@
   DungeonScene.prototype._offerBlessing = function () {
     if (!this.game.run) return;
 
-    var choices = this.blessings.pickChoices(this.game.run);
+    // game を渡すことで、買っていない加護と、外している加護が候補から抜ける
+    var choices = this.blessings.pickChoices(this.game.run, this.game);
     if (choices.length === 0) return;
 
     this.game.scenes.change(new NS.BlessingScene(this.game, choices, this));
@@ -303,7 +558,8 @@
       // 戻り値をそのまま返すことで、遷移を自前で行ったかどうかを BattleScene へ伝える
       function (result) { return self._onBattleFinished(result); }
     );
-    this.game.scenes.change(battle);
+    // 敵と出会う演出をはさむ（data/ui.js の transition.effects.encounter）
+    this.game.scenes.change(battle, "encounter");
   };
 
   /** ボス戦を開始する。捕獲・逃走の可否はボス定義（data/bosses.js）に従う */
@@ -311,6 +567,13 @@
     var self = this;
     var enemy = NS.MonsterInstance.create(boss.species, boss.level, this.game.data, this.random);
     if (!enemy) return;
+
+    // 主としての補正。仲間にすると外れるので、基礎値を上げずに強くできる
+    if (enemy.setBossMultipliers) enemy.setBossMultipliers(boss.statMultiplier);
+    // 決まった順番で動く主は、ここで手順を渡す
+    if (enemy.setActionPattern) enemy.setActionPattern(boss.actionPattern);
+    // 主として立ちはだかるあいだだけ効かない状態異常（毒・即死など）
+    if (enemy.setBossStatusImmunity) enemy.setBossStatusImmunity(boss.immuneToStatus);
 
     var texts = (this.game.data.messages || {}).boss || {};
     var name = boss.title || enemy.getName();
@@ -322,12 +585,33 @@
       this,
       function (result) { return self._onBossBattleFinished(result, boss); },
       {
-        allowScout: boss.canScout === true,
+        allowScout: this._canScoutBoss(boss),
         allowFlee: boss.canFlee === true,
+        // ボスは高いレベルで戦うので、仲間になるときはレベルを下げる
+        scoutLevel: this._bossJoinLevel(boss),
         introMessage: texts.appear ? texts.appear.replace("{name}", name) : null
       }
     );
-    this.game.scenes.change(battle);
+    this.game.scenes.change(battle, "encounter");
+  };
+
+  /**
+   * そのボスを誘えるか。
+   * 条件（scoutableWhen）はダンジョンや店の解放条件と同じ仕組みで判定する。
+   * 条件が書かれていないボスは誘えない。
+   */
+  DungeonScene.prototype._canScoutBoss = function (boss) {
+    if (!boss || !boss.scoutableWhen) return false;
+    if (!NS.DungeonCatalog) return false;
+
+    return NS.DungeonCatalog.isConditionMet(
+      boss.scoutableWhen, this.game.clearedDungeons, this.game.data);
+  };
+
+  /** ボスが仲間になったときのレベル（ボス個別の指定 → data/scout.js の既定） */
+  DungeonScene.prototype._bossJoinLevel = function (boss) {
+    if (boss && boss.scoutLevel !== undefined) return boss.scoutLevel;
+    return (this.game.data.scout || {}).bossJoinLevel;
   };
 
   /**
@@ -336,16 +620,24 @@
    * @returns {boolean} 遷移を自前で行った場合 true
    */
   DungeonScene.prototype._onBossBattleFinished = function (result, boss) {
+    // 誘いに応じてもらえたら、その挑戦はそこで終わる。
+    // ボス戦が終わったことに変わりはないので、勝ったときと同じように拠点へ帰る
+    // （その場に残れると、主を何体でも狩れてしまう）
+    if (result === "scouted") {
+      this._returnToHome(true, "scouted");
+      return true;
+    }
+
     if (result !== "win") return this._onBattleFinished(result);
 
     this.game.markDungeonCleared(this.definition && this.definition.id);
 
-    // 最後のボスならエンディングへ、そうでなければ拠点へ帰還する
+    // 最後のボスならエンディングへ、そうでなければ結果を見せてから拠点へ
     if (boss.isFinal) {
       this.game.endRun(true);
       this.game.scenes.change(new NS.EndingScene(this.game));
     } else {
-      this._returnToHome(true);
+      this._returnToHome(true, "cleared");
     }
     return true;
   };
@@ -366,31 +658,29 @@
   };
 
   /**
-   * 挑戦を終えて拠点へ戻る。
+   * 挑戦を終えて結果画面へ。拠点へはそこから戻る。
+   *
+   * 何を持ち帰れたかは endRun の前に控えておく（endRun で記録が消えるため）。
+   *
    * @param {boolean} survived 無事に帰れたか（false なら拾ったものを失う）
+   * @param {string} [outcome] "escaped" / "cleared" / "defeated"。省略時は生死から決める
    */
-  DungeonScene.prototype._returnToHome = function (survived) {
+  DungeonScene.prototype._returnToHome = function (survived, outcome) {
+    if (this.game.run) this.game.run.recordFloor(this.floor);
+
+    var summary = this.game.run ? this.game.run.getSummary() : null;
     var lost = this.game.endRun(survived);
-    var notice = survived ? null : this._formatLostItems(lost.items);
 
-    this.game.scenes.change(new NS.HomeScene(this.game, notice));
+    this.game.scenes.change(new NS.ResultScene(this.game, {
+      outcome: outcome || (survived ? "escaped" : "defeated"),
+      dungeon: (summary && summary.dungeon) || this.definition,
+      floor: (summary && summary.floor) || this.floor,
+      gold: (summary && summary.gold) || 0,
+      items: (summary && summary.items) || [],
+      lostItems: (lost && lost.items) || []
+    }));
   };
 
-  /** 失ったものを1行の文章にする（何も失っていなければ、その旨を返す） */
-  DungeonScene.prototype._formatLostItems = function (items) {
-    var texts = (this.game.data.messages || {}).run || {};
-    if (!items || items.length === 0) return texts.lostNothing || null;
-
-    var parts = [];
-    for (var i = 0; i < items.length; i++) {
-      var item = this.game.data.getItem(items[i].itemId);
-      parts.push((texts.lostEntry || "{name}×{count}")
-        .replace("{name}", (item && item.name) || items[i].itemId)
-        .replace("{count}", items[i].count));
-    }
-    return (texts.lostItems || "{list}")
-      .replace("{list}", parts.join(texts.separator || "、"));
-  };
 
   DungeonScene.prototype.render = function (ctx) {
     var w = this.game.canvas.width;
@@ -398,16 +688,20 @@
     var ts = this.dungeon.tileSize;
 
     var L = (this.game.data.ui || {}).dungeon || {};
-    this.renderer.clear(L.background || "#05070d", w, h);
+
+    // 色はダンジョンごとのテーマが優先。書かれていなければ既定の色を使う
+    var tileColors = this.theme.tiles || {};
+    var mark = merge(L.stairsMark || {}, this.theme.stairsMark);
+
+    this.renderer.clear(this.theme.background || L.background || "#05070d", w, h);
 
     // タイル描画
-    var mark = L.stairsMark || {};
     for (var r = 0; r < this.dungeon.height; r++) {
       for (var c = 0; c < this.dungeon.width; c++) {
         var tile = this.dungeon.tileAt(c, r);
         if (!tile) continue;
 
-        this.renderer.rect(c * ts, r * ts, ts, ts, tile.color);
+        this.renderer.rect(c * ts, r * ts, ts, ts, tileColors[tile.name] || tile.color);
 
         // 階段はひと目で分かるように記号を重ねる
         if (tile.stairs) {
@@ -417,30 +711,82 @@
       }
     }
 
+    this._renderDecorations(ts);
     this._renderFeatures(ts, L.featureMark || {});
 
     // プレイヤー描画（グリッド座標→ピクセル座標への変換はここでのみ行う）
-    var px = this.player.col * ts;
-    var py = this.player.row * ts;
-    this.sprites.draw(this.player.spriteId, px, py, ts, ts);
+    //   描くのは「見た目の位置」。判定に使う col/row を少し遅れて追いかける
+    var px = this.player.viewCol * ts;
+    var py = this.player.viewRow * ts;
+    this.sprites.drawMotion(this.player.spriteId, px, py, ts, ts,
+      NS.Motion.forSprite(this.game.data, this.player.spriteId, L.playerMotion,
+        this.game.clock, 0));
 
     this._renderInfoBar(w, h, L.infoBar || {});
     this._renderPartyStatus(w, L.statusBar || {});
+    // マウス用のボタンは地図の上に重ねる
+    this.partyButton.render();
+    this.itemsButton.render();
+
     this._renderNotice(w, h, L.notice || {});
+    this._renderPrompt();
+    this.fade.render(ctx);   // 階の切り替えの暗幕は、すべての上に重ねる
   };
 
   /**
-   * 仕掛けマスの記号を重ねて描く。
-   * 隠されているもの（罠）は踏むまで描かない。
+   * 床の飾りを描く。
+   * タイルの上・仕掛けの下に置くので、宝箱などを隠すことはない。
+   */
+  DungeonScene.prototype._renderDecorations = function (ts) {
+    for (var i = 0; i < this.decorations.length; i++) {
+      var deco = this.decorations[i];
+      this.sprites.draw(deco.sprite, deco.col * ts, deco.row * ts, ts, ts);
+    }
+  };
+
+  /** 出している問いかけ（聞いている間だけ出す） */
+  DungeonScene.prototype._renderPrompt = function () {
+    if (!this._prompt) return;
+
+    var rect = this._prompt.rect;
+    var lineHeight = rect.lineHeight || 20;
+    var origin = this.panel.innerOrigin(rect);
+    var lines = this._prompt.lines;
+
+    this.panel.drawBox(rect);
+    for (var i = 0; i < lines.length; i++) {
+      this.panel.drawText(lines[i], origin.x, origin.y + lineHeight * (i + 1) - 4);
+    }
+    this._prompt.menu.render(this.game.clock);
+  };
+
+  /**
+   * 仕掛けマスを描く。
+   *
+   * ・隠されているもの（罠）は踏むまで描かない
+   * ・使い終わったものは、usedSprite が指定されているときだけ跡を残す
+   *   （開いた宝箱・水の引いた泉・作動した罠。通った場所が分かるように）
+   * ・スプライトが無い仕掛けは、今までどおり記号で描く
    */
   DungeonScene.prototype._renderFeatures = function (ts, style) {
     for (var i = 0; i < this.placedFeatures.length; i++) {
       var feature = this.placedFeatures[i];
       var definition = feature.definition || {};
 
-      if (feature.used) continue;
+      if (feature.used) {
+        if (!definition.usedSprite) continue;
+        this._drawFeatureSprite(definition.usedSprite, feature, ts);
+        continue;
+      }
+
       if (definition.hidden) continue;
 
+      if (definition.sprite) {
+        this._drawFeatureSprite(definition.sprite, feature, ts);
+        continue;
+      }
+
+      // 絵が用意されていない仕掛けは記号で示す
       this.renderer.text(definition.mark || "?",
         feature.col * ts + ts / 2, feature.row * ts + ts / 2 + 6,
         {
@@ -449,6 +795,11 @@
           align: "center"
         });
     }
+  };
+
+  /** 仕掛けの絵を1マス分描く */
+  DungeonScene.prototype._drawFeatureSprite = function (spriteId, feature, ts) {
+    this.sprites.draw(spriteId, feature.col * ts, feature.row * ts, ts, ts);
   };
 
   /** 画面下部の情報帯（階層・操作説明）。文言は data/messages.js */
@@ -486,12 +837,18 @@
 
   /** セーブ結果などの通知（画面中央） */
   DungeonScene.prototype._renderNotice = function (w, h, style) {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
 
+    var ctx = this.game.ctx;
     var noticeHeight = style.height || 40;
+
+    // 帯と文字をまとめて薄くする（別々にすると帯だけ残って見える）
+    ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
     this.renderer.rect(0, (h - noticeHeight) / 2, w, noticeHeight, style.bg || "rgba(8,10,20,0.92)");
-    this.renderer.text(this._notice, w / 2, h / 2 + 6,
+    this.renderer.text(this.notice.getText(), w / 2, h / 2 + 6,
       { color: style.color || "#ffd75e", font: style.font || "15px monospace", align: "center" });
+    ctx.restore();
   };
 
   NS.DungeonScene = DungeonScene;

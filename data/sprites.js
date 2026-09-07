@@ -1,6 +1,6 @@
 /**
  * sprites.js
- * スプライト（見た目）の定義。
+ * スプライト（見た目）の定義のうち、どこでも使う共通のもの。
  *
  * file:// でも確実に動くよう、既定は「コード生成方式」：
  *   { pixels: [...文字列配列...], palette: { 記号: 色 } }
@@ -11,11 +11,49 @@
  *   （AssetLoader が src を優先して画像を読み込む）
  *
  * palette の色に null（または未定義）を指定した記号は「透明」。
+ *
+ * ─────────────────────────────────────────────
+ * ▼ ファイルの分け方
+ *
+ * 絵は増え続けるので、1ファイルにまとめず用途と地方で分けている。
+ *   data/sprites.js           … プレイヤーなど、どこでも使う共通のもの（このファイル）
+ *   data/sprites_features.js  … ダンジョンの仕掛けマスと床の飾り
+ *   data/sprites_abyss.js     … 地方「深淵」のモンスター
+ *
+ * 別の地方が増えたら data/sprites_〇〇.js を足し、app.html の一覧に加えるだけでよい。
+ * どのファイルも MyGame.extend("sprites", {...}) で同じ入れ物へ追加するので、
+ * 読み込む順番は問わない（同じidを2か所に書かないことだけ注意）。
+ * ─────────────────────────────────────────────
+ * ▼ 大きさ（α-5でモンスターを 32×32 に移行中）
+ *
+ * AssetLoader は配列そのものから縦横を測るので、**大きさは自由**。
+ *   h = pixels.length      … 行数がそのまま高さ
+ *   w = pixels[0].length   … 1行目の文字数がそのまま幅
+ * 16×16 と 32×32 が混ざっていても動く。描画は drawImage で表示サイズへ伸縮される。
+ *
+ * ★ モンスターは 32×32 で描く。UIのアイコンと仕掛けマスは 16×16 のままでよい。
+ *   モンスターがいちばん大きく出るのは戦闘の96pxで、
+ *   16×16 だと6倍に伸びて粗い。32×32 なら3倍で収まる。
+ *
+ * ▼ 描き分けの決まり —— これを守らないと全部同じ顔になる
+ *
+ * 実際に一度失敗している。静寂の深層の5種のうち4種を
+ * 「丸い輪郭・左右対称・点目ふたつ」で描いたため、並べると見分けがつかなかった。
+ * 解像度を上げても、同じ描き方をすれば同じように似る。
+ *
+ *   1. シルエットを変える。縦長・横長・三角・ぎざぎざ・ぶら下がり など、
+ *      色を塗りつぶしても種族が分かる形にする
+ *   2. 左右対称にしすぎない。片側だけ角がある・傾いている・触手が伸びる、など
+ *   3. 目を同じにしない。数（1つ/2つ/複数）・形（丸/細い/裂けた）・位置を変える
+ *   4. 枠いっぱいに描かない。小さい相手は小さく描いて、大きさ自体で格を示す
+ *   5. マップでは32pxの等倍になり細部が潰れる。
+ *      「細かく描き込む」より「形で分かる」を優先する
+ * ─────────────────────────────────────────────
  */
 (function (NS) {
   "use strict";
 
-  NS.rawData.sprites = {
+  NS.extend("sprites", {
     player: {
       palette: {
         ".": null,        // 透明
@@ -42,266 +80,6 @@
         "...KK....KK.....",
         "................"
       ]
-    },
-
-    slime: {
-      palette: {
-        ".": null,
-        "K": "#0f2a1e",   // 輪郭
-        "G": "#5fd18c",   // 体（緑）
-        "L": "#a8f0c4",   // ハイライト
-        "W": "#ffffff"    // 目
-      },
-      pixels: [
-        "................",
-        "................",
-        ".......KKK......",
-        ".....KKGGGKK....",
-        "....KGLGGGGGK...",
-        "...KGLGGGGGGGK..",
-        "...KGGGGGGGGGK..",
-        "..KGGWWGGGWWGGK.",
-        "..KGGWWGGGWWGGK.",
-        "..KGGGGGGGGGGGK.",
-        "..KGGGGGGGGGGGK.",
-        "..KGGGGGGGGGGGK.",
-        "..KGGGGGGGGGGGK.",
-        "..KKGGGGGGGGGKK.",
-        "....KKKKKKKKK...",
-        "................"
-      ]
-    },
-
-    kingSlime: {
-      palette: {
-        ".": null,
-        "K": "#0a1f2e",   // 輪郭
-        "B": "#4fb0d1",   // 体（青緑）
-        "L": "#a8e8f0",   // ハイライト
-        "Y": "#ffd75e",   // 王冠
-        "W": "#ffffff"    // 目
-      },
-      pixels: [
-        ".....Y.Y.Y......",
-        "....YYYYYYY.....",
-        "....YYYYYYY.....",
-        "......KKK.......",
-        "....KKBBBKK.....",
-        "...KBLBBBBBK....",
-        "..KBLBBBBBBBK...",
-        "..KBBBBBBBBBK...",
-        ".KBBWWBBBWWBBK..",
-        ".KBBWWBBBWWBBK..",
-        ".KBBBBBBBBBBBK..",
-        ".KBBBBKKKBBBBK..",
-        ".KBBBBBBBBBBBK..",
-        ".KKBBBBBBBBBKK..",
-        "..KKKKKKKKKKK...",
-        "................"
-      ]
-    },
-
-    batty: {
-      palette: {
-        ".": null,
-        "K": "#1a1030",
-        "P": "#8b6fd6",   // 体（紫）
-        "D": "#5a44a0",   // 翼の影
-        "W": "#ffe36e"    // 目
-      },
-      pixels: [
-        "................",
-        "................",
-        "..K..........K..",
-        ".KDK........KDK.",
-        ".KDDK.KKK..KDDK.",
-        ".KDDDKPPPKKDDDK.",
-        ".KDDDKPPPKKDDDK.",
-        ".KDDKPWPWPKKDDK.",
-        "..KKKPPPPPKKKK..",
-        "....KPWPWPK.....",
-        "....KPPPPPK.....",
-        ".....KPPPK......",
-        "......KKK.......",
-        "................",
-        "................",
-        "................"
-      ]
-    },
-
-    // --- 苔むす坑道のモンスター ---
-
-    mossRat: {
-      palette: {
-        ".": null,
-        "K": "#221b12",   // 輪郭
-        "G": "#9a8b70",   // 体（灰茶）
-        "M": "#6fa84f",   // 背の苔
-        "W": "#ffe36e",   // 目
-        "T": "#7a6b52"    // 尻尾
-      },
-      pixels: [
-        "................",
-        "..KK........KK..",
-        ".KGGK......KGGK.",
-        ".KGGK......KGGK.",
-        "..KGGKKKKKKGGK..",
-        ".KGGMGGGGGGMGGK.",
-        ".KGGGMGGGGMGGGK.",
-        ".KGWWGGGGGGWWGK.",
-        ".KGWWGGGGGGWWGK.",
-        ".KGGGGGKKGGGGGK.",
-        ".KGGGGGGGGGGGGK.",
-        "..KGGGGGGGGGGK..",
-        "TTKGGGGGGGGGGK..",
-        "T.KKGGKKGGKKGK..",
-        "....KK..KK......",
-        "................"
-      ]
-    },
-
-    rocky: {
-      palette: {
-        ".": null,
-        "K": "#2b2a26",   // 輪郭
-        "S": "#7d7a72",   // 岩肌
-        "D": "#4f4d47",   // ひび
-        "M": "#6fa84f",   // 苔
-        "W": "#ffd75e"    // 目
-      },
-      pixels: [
-        "................",
-        "................",
-        "....KKKKKKKK....",
-        "...KSSSSSSSSK...",
-        "..KSSMSSSSMSSK..",
-        ".KSSSSSSSSSSSSK.",
-        ".KSSWWSSSSWWSSK.",
-        ".KSSWWSSSSWWSSK.",
-        ".KSSSSSSSSSSSSK.",
-        ".KSSSSSSSSSSSSK.",
-        ".KSSSDDSSDDSSSK.",
-        ".KSSSSSSSSSSSSK.",
-        "..KSSSSSSSSSSK..",
-        "...KKSSSSSSKK...",
-        ".....KKKKKK.....",
-        "................"
-      ]
-    },
-
-    glowBug: {
-      palette: {
-        ".": null,
-        "K": "#2a2410",   // 輪郭
-        "Y": "#ffe36e",   // 光る部分
-        "L": "#bfe4ff",   // 羽
-        "B": "#6b5a2e",   // 胴
-        "W": "#3a2f10"    // 目
-      },
-      pixels: [
-        "................",
-        "......KKKK......",
-        ".....KYYYYK.....",
-        "..K.KYWYYWYK.K..",
-        ".KLK.KYYYYK.KLK.",
-        ".KLLK.KKKK.KLLK.",
-        ".KLLLKBBBBKLLLK.",
-        "..KLLKBBBBKLLK..",
-        "...KKKBBBBKKK...",
-        "......KBBK......",
-        "......KYYK......",
-        ".....KYYYYK.....",
-        "......KYYK......",
-        ".......KK.......",
-        "................",
-        "................"
-      ]
-    },
-
-    sporin: {
-      palette: {
-        ".": null,
-        "K": "#241a2e",   // 輪郭
-        "P": "#8a5fb0",   // 傘（紫）
-        "W": "#e8d5ff",   // 傘のまだら
-        "S": "#e8e0d0",   // 柄
-        "E": "#2a1f38"    // 目
-      },
-      pixels: [
-        "................",
-        ".....KKKKKK.....",
-        "...KKPPPPPPKK...",
-        "..KPPPPWWPPPPK..",
-        ".KPPWWPPPPWWPPK.",
-        ".KPPPPPPPPPPPPK.",
-        "KPPPPWWPPWWPPPPK",
-        "KPPPPPPPPPPPPPPK",
-        ".KKKKKKKKKKKKKK.",
-        "....KSSSSSSK....",
-        "....KSESSESK....",
-        "....KSSSSSSK....",
-        "....KSSSSSSK....",
-        "....KSSSSSSK....",
-        "....KKSSSSKK....",
-        "......KKKK......"
-      ]
-    },
-
-    mossGolem: {
-      palette: {
-        ".": null,
-        "K": "#1d2418",   // 輪郭
-        "S": "#6e6a5c",   // 石の体
-        "M": "#5f9a45",   // 苔
-        "W": "#a8f0c4"    // 光る目
-      },
-      pixels: [
-        "..KKKK....KKKK..",
-        ".KMMMMKKKKMMMMK.",
-        ".KMSSMMMMMMSSMK.",
-        "KSSSSSSSSSSSSSSK",
-        "KSSMSSSSSSSSMSSK",
-        "KSWWSSSSSSSSWWSK",
-        "KSWWSSSSSSSSWWSK",
-        "KSSSSSKKKKSSSSSK",
-        "KSSSSSSSSSSSSSSK",
-        ".KSSMSSSSSSMSSK.",
-        ".KSSSSSSSSSSSSK.",
-        "..KSSSSSSSSSSK..",
-        "..KSSKKKKKKSSK..",
-        ".KSSK......KSSK.",
-        ".KSSK......KSSK.",
-        ".KKKK......KKKK."
-      ]
-    },
-
-    flamin: {
-      palette: {
-        ".": null,
-        "K": "#3a1002",
-        "R": "#e8542a",   // 体（赤）
-        "O": "#ffa32e",   // 炎（橙）
-        "Y": "#ffe66e",   // 炎（黄）
-        "W": "#ffffff"
-      },
-      pixels: [
-        "................",
-        ".......Y........",
-        "......YOY.......",
-        ".....YOOOY......",
-        "....KYOOOYK.....",
-        "...KRROOORRK....",
-        "..KRRRRRRRRRK...",
-        "..KRRWRRRWRRK...",
-        "..KRRWRRRWRRK...",
-        "..KRRRRRRRRRK...",
-        "..KRRRRRRRRRK...",
-        "...KRRRRRRRK....",
-        "....KRRKKRRK....",
-        "....KKK..KKK....",
-        "................",
-        "................"
-      ]
     }
-  };
+  });
 })(window.MyGame);

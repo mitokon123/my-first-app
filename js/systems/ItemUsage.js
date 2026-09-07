@@ -23,6 +23,25 @@
       target.heal(effect.value || 0);
       var healed = target.currentHp - before;
       return { applied: healed > 0, amount: healed };
+    },
+
+    /** PPを回復する。満タンのときは使えない（回復薬と同じ扱い） */
+    healPp: function (effect, target) {
+      if (!target || target.getMaxPp === undefined) return { applied: false, amount: 0 };
+
+      var before = target.currentPp;
+      target.currentPp = Math.min(target.getMaxPp(), before + (effect.value || 0));
+      var healed = target.currentPp - before;
+      return { applied: healed > 0, amount: healed };
+    },
+
+    /**
+     * その場から拠点へ帰る。
+     * ここでは「使えた」と返すだけで、実際に帰るのは画面側が行う
+     * （ItemUsage は場面を知らないままにしておく）。
+     */
+    escape: function () {
+      return { applied: true, amount: 0 };
     }
   };
 
@@ -42,6 +61,22 @@
     var item = this.data.getItem(itemId);
     if (!item || !item.effect) return false;
     return (item.usableIn || []).indexOf(scene) >= 0;
+  };
+
+  /**
+   * 相手を選ばずに使うアイテムか（帰還の石など）。
+   * true なら、画面側は対象選びを飛ばしてそのまま使う。
+   */
+  ItemUsage.prototype.needsTarget = function (itemId) {
+    var item = this.data.getItem(itemId);
+    var type = item && item.effect && item.effect.type;
+    return type !== "escape";
+  };
+
+  /** そのアイテムを使うと拠点へ帰るか */
+  ItemUsage.prototype.isEscape = function (itemId) {
+    var item = this.data.getItem(itemId);
+    return !!(item && item.effect && item.effect.type === "escape");
   };
 
   /**

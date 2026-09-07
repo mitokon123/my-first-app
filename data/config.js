@@ -9,7 +9,7 @@
   NS.rawData.config = {
     gameTitle: "ABYSS CHRONICLE", // ゲーム名
     worldName: "Monstoria",       // 世界名
-    version: "α-1",     // バージョン表記（履歴は data/patchnotes.js）
+    version: "α-5",     // バージョン表記（履歴は data/patchnotes.js）
     canvasWidth: 800,   // 画面の横幅（px）
     canvasHeight: 600,  // 画面の縦幅（px）
     tileSize: 32,       // 1タイルの大きさ（px）

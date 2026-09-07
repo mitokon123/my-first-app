@@ -22,8 +22,13 @@
     // キャンバスを渡すことで、マウス操作も受け取れるようにする。
     // 設定も渡すことで、ホイールの速さが設定画面の値に従う
     this.input = new NS.Input(gameData.keys, canvas, this.settings);
-    this.scenes = new NS.SceneManager();
+    // 画面の切り替えを暗転でつなぐ（長さと色は data/ui.js の transition）
+    this.scenes = new NS.SceneManager((gameData.ui || {}).transition);
     this.loop = new NS.GameLoop(this._update.bind(this), this._render.bind(this));
+
+    // 起動からの経過ミリ秒。絵の動き（MyGame.Motion）が参照する共通の時計。
+    // シーンごとに時間を数えなくて済むよう、ここで1つだけ持つ。
+    this.clock = 0;
 
     // ドット絵をぼかさずに描画する
     this.ctx.imageSmoothingEnabled = false;
@@ -52,6 +57,12 @@
     if (!this.clearedDungeons) {
       this.clearedDungeons = {};
     }
+    if (!this.boughtBlessings) {
+      this.boughtBlessings = {};
+    }
+    if (!this.offBlessings) {
+      this.offBlessings = {};
+    }
     if (typeof this.gold !== "number") {
       this.gold = (this.data.player || {}).startingGold || 0;
     }
@@ -71,6 +82,121 @@
 
   Game.prototype.isDungeonCleared = function (dungeonId) {
     return !!(this.clearedDungeons && this.clearedDungeons[dungeonId]);
+  };
+
+  // --- 加護の持ち物（挑戦をまたいで残る） ---
+  //
+  // data/blessings.js に locked: true と書いた加護は、最初は選択肢に出ない。
+  // 謎の商人から買うと恒久的に解放される（boughtBlessings）。
+  // 解放済みの加護は、拠点の画面で1つずつ外せる（offBlessings）。
+  // どちらも「持っているダンジョン」と同じく { id: true } の形で保存する。
+
+  /** 加護を買った（恒久解放）ものとして記録する */
+  Game.prototype.markBlessingBought = function (blessingId) {
+    if (!blessingId) return;
+    if (!this.boughtBlessings) this.boughtBlessings = {};
+    this.boughtBlessings[blessingId] = true;
+  };
+
+  Game.prototype.hasBoughtBlessing = function (blessingId) {
+    return !!(this.boughtBlessings && this.boughtBlessings[blessingId]);
+  };
+
+  /**
+   * その加護を持っているか（選択肢に出しうるか）。
+   * 最初から使えるものは買わなくても持っている扱い。
+   */
+  Game.prototype.ownsBlessing = function (blessingId) {
+    var blessing = (this.data.blessings || {})[blessingId];
+    if (!blessing) return false;
+    return blessing.locked ? this.hasBoughtBlessing(blessingId) : true;
+  };
+
+  /** 持っている加護のid一覧（買ったものと、最初から使えるもの） */
+  Game.prototype.getOwnedBlessingIds = function () {
+    var blessings = this.data.blessings || {};
+    var ids = [];
+
+    for (var id in blessings) {
+      if (!Object.prototype.hasOwnProperty.call(blessings, id)) continue;
+      if (this.ownsBlessing(id)) ids.push(id);
+    }
+    return ids;
+  };
+
+  /** いま選択肢に入れている加護の数 */
+  Game.prototype.countActiveBlessings = function () {
+    var ids = this.getOwnedBlessingIds();
+    var count = 0;
+
+    for (var i = 0; i < ids.length; i++) {
+      if (this.isBlessingActive(ids[i])) count++;
+    }
+    return count;
+  };
+
+  /** 選択肢に入れておける数の上限（data/run.js の blessing.activeMax） */
+  Game.prototype.getBlessingActiveMax = function () {
+    var max = (((this.data.run || {}).blessing) || {}).activeMax;
+    return (typeof max === "number") ? max : Infinity;
+  };
+
+  /**
+   * 選択肢に出す／出さないを切り替える。
+   *
+   * 入れられるのは上限まで。いっぱいのときに入れようとしても何も起きない
+   * （どれかを外してから入れ直す）。
+   *
+   * @returns {{changed:boolean, active:boolean, reason:string}}
+   *   reason: "on" | "off" | "full"
+   */
+  Game.prototype.toggleBlessing = function (blessingId) {
+    if (!this.ownsBlessing(blessingId)) {
+      return { changed: false, active: false, reason: "notOwned" };
+    }
+    if (!this.offBlessings) this.offBlessings = {};
+
+    if (this.offBlessings[blessingId]) {
+      if (this.countActiveBlessings() >= this.getBlessingActiveMax()) {
+        return { changed: false, active: false, reason: "full" };
+      }
+      delete this.offBlessings[blessingId];
+      return { changed: true, active: true, reason: "on" };
+    }
+
+    this.offBlessings[blessingId] = true;
+    return { changed: true, active: false, reason: "off" };
+  };
+
+  /**
+   * 加護を買う。買った加護は自動では選択肢に入れない
+   * （上限があるので、入れ替えは拠点の画面で選ばせる）。
+   * @returns {{success:boolean, reason:string}}
+   *   reason: "bought" | "already" | "notForSale" | "notEnoughGold"
+   */
+  Game.prototype.buyBlessing = function (blessingId) {
+    var blessing = (this.data.blessings || {})[blessingId];
+    if (!blessing || !blessing.locked) return { success: false, reason: "notForSale" };
+    if (this.hasBoughtBlessing(blessingId)) return { success: false, reason: "already" };
+
+    var price = blessing.price || 0;
+    if (this.gold < price) return { success: false, reason: "notEnoughGold" };
+
+    this.gold -= price;
+    this.markBlessingBought(blessingId);
+
+    // 空きがあるうちは、買ってすぐ使えるように入れておく
+    if (this.countActiveBlessings() > this.getBlessingActiveMax()) {
+      if (!this.offBlessings) this.offBlessings = {};
+      this.offBlessings[blessingId] = true;
+    }
+    return { success: true, reason: "bought" };
+  };
+
+  /** いま選択肢に出る加護か（持っていて、かつ外していない） */
+  Game.prototype.isBlessingActive = function (blessingId) {
+    if (!this.ownsBlessing(blessingId)) return false;
+    return !(this.offBlessings && this.offBlessings[blessingId]);
   };
 
   // --- 挑戦（ラン） ---
@@ -180,6 +306,8 @@
   Game.prototype.giveGold = function (amount) {
     if (!amount || amount <= 0) return 0;
     this.gold += amount;
+    // 結果画面で「いくら稼いだか」を出せるよう、挑戦中は記録しておく
+    if (this.run) this.run.recordGold(amount);
     return amount;
   };
 
@@ -342,6 +470,7 @@
   };
 
   Game.prototype._update = function (dt) {
+    this.clock += dt;
     this.input.update();
     this.scenes.update(dt);
     this.input.lateUpdate();

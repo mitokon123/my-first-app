@@ -154,6 +154,58 @@
     return spots;
   };
 
+  /**
+   * 踏んだときに「使うか」を聞く仕掛けか。
+   * data/features.js の confirm で決める。
+   */
+  FeatureSystem.prototype.needsConfirm = function (feature) {
+    return !!(feature && feature.definition && feature.definition.confirm);
+  };
+
+  /** 聞くときの文（data/messages.js の feature.〇〇Prompt） */
+  FeatureSystem.prototype.getPrompt = function (feature) {
+    if (!feature) return "";
+    return this.texts[feature.type + "Prompt"] || "";
+  };
+
+  /** 使わずにおいたときの文（無ければ null） */
+  FeatureSystem.prototype.getSkipMessage = function (feature) {
+    if (!feature) return null;
+    return this.texts[feature.type + "Skipped"] || null;
+  };
+
+  /** 「使う / やめておく」の選択肢 */
+  FeatureSystem.prototype.getConfirmChoices = function () {
+    return [
+      { label: this.texts.confirmYes || "使う",       value: true },
+      { label: this.texts.confirmNo  || "やめておく", value: false }
+    ];
+  };
+
+  /**
+   * その仕掛けの効果を返す。
+   *
+   * 中身を配る仕掛け（giveItem）だけは、data/features.js の「どこでも出る中身」に
+   * data/dungeons.js の featureTables に書いた「その場所でしか出ない中身」を足す。
+   * 上書きではなく追加なので、共通の中身はどのダンジョンでも出続ける。
+   *
+   * ★ 新しいステージの宝箱に素材を入れたいときは、
+   *   dungeons.js の featureTables に足すだけでよい（このファイルは変更不要）。
+   */
+  FeatureSystem.prototype._effectFor = function (definition, type) {
+    var effect = definition.effect || {};
+    var extra = (this.dungeon.featureTables || {})[type];
+    if (!extra || !extra.length || !effect.table) return effect;
+
+    // 元の effect は共有物なので、書き換えずに複製してから足す
+    var merged = {};
+    for (var key in effect) {
+      if (Object.prototype.hasOwnProperty.call(effect, key)) merged[key] = effect[key];
+    }
+    merged.table = effect.table.concat(extra);
+    return merged;
+  };
+
   /** 指定マスにある、まだ使っていない仕掛けを返す */
   FeatureSystem.prototype.findAt = function (features, col, row) {
     for (var i = 0; i < (features || []).length; i++) {
@@ -173,7 +225,7 @@
     if (!feature || feature.used) return [];
 
     var definition = feature.definition || {};
-    var effect = definition.effect || {};
+    var effect = this._effectFor(definition, feature.type);
     var messages = [];
 
     // 踏んだこと自体の知らせ（「宝箱を見つけた!」など）

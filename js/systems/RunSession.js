@@ -18,8 +18,35 @@
     this.dungeon = dungeon || null;
     this.gainedItems = {};    // itemId → 個数
     this.gainedMonsters = []; // そのランで仲間になった個体
+    this.gainedGold = 0;      // そのランで得たゴールド（全滅しても失わない）
     this.blessings = [];      // 階を降りるたびに選んだ加護（data/blessings.js の定義）
+    this.deepestFloor = 1;    // いちばん深く潜った階
   }
+
+  /** そのランで得たゴールドを記録する */
+  RunSession.prototype.recordGold = function (amount) {
+    if (!amount || amount <= 0) return;
+    this.gainedGold += amount;
+  };
+
+  /** 到達した階を記録する（いちばん深いところだけ覚える） */
+  RunSession.prototype.recordFloor = function (floor) {
+    if (floor > this.deepestFloor) this.deepestFloor = floor;
+  };
+
+  /**
+   * その挑戦で得たものをまとめて返す。
+   * 結果画面に出すためのもので、記録そのものは変えない。
+   */
+  RunSession.prototype.getSummary = function () {
+    return {
+      dungeon: this.dungeon,
+      floor: this.deepestFloor,
+      gold: this.gainedGold,
+      items: this.getGainedItems(),
+      monsters: this.gainedMonsters.slice()
+    };
+  };
 
   /** 加護を1つ得る */
   RunSession.prototype.addBlessing = function (blessing) {

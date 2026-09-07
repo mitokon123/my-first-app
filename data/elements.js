@@ -3,29 +3,66 @@
  * 属性の定義。火・水・風・地・雷・光・闇 の7属性と、耐性の影響を受けない「無」。
  *
  * id / name / color : 識別子・表示名・図鑑などで使う色
+ * order             : 並び順。図鑑の「技」を属性ごとに区切るときの順番に使う
  * physical          : true なら耐性計算の対象外（無属性）
  *
  * ▼ 属性ダメージの倍率（data/battle.js の resistance で調整）
- *   倍率 = 1 - 耐性 × step        （step は現在 0.07）
+ *   耐性が0以上   … 倍率 = 1 - 耐性 × resistStep（現在 0.10。+10 で無効）
+ *   耐性がマイナス … 倍率 = 1 + |耐性| × weaknessStep（現在 0.20。-5 で2倍）
  *   耐性は -5〜10 で、data/monsters.js の resistances に書く。
  *   immunities に属性idを入れると、その属性は完全に無効（ダメージ0）になる。
  *
  * ★ 属性を増やすときは、このファイルに1エントリ足すだけでよい。
  *   モンスターは monsters.js の element、技は skills.js の element で参照する。
+ *
+ * ─────────────────────────────────────────────
+ * ▼ 各属性の役どころ（バランスを決めるときの拠りどころ）
+ *
+ * 属性ごとに「どんな立ち位置か」を決めてある。
+ * モンスターの耐性や新しい技を足すときは、ここに沿って決める。
+ * 数値だけ見ても意図が分からなくなるので、考えを残しておく。
+ * ─────────────────────────────────────────────
  */
 (function (NS) {
   "use strict";
 
   NS.rawData.elements = {
     // 耐性の影響を受けない。通常攻撃や「体当たり」などに使う
-    none:    { id: "none",    name: "無",   color: "#9aa4c0", physical: true },
+    none:    { id: "none",    name: "無",   color: "#9aa4c0", order: 0, physical: true },
 
-    fire:    { id: "fire",    name: "火",   color: "#e8542a" },
-    water:   { id: "water",   name: "水",   color: "#4fb0d1" },
-    wind:    { id: "wind",    name: "風",   color: "#7fd9a8" },
-    earth:   { id: "earth",   name: "地",   color: "#c8a35e" },
-    thunder: { id: "thunder", name: "雷",   color: "#ffd75e" },
-    light:   { id: "light",   name: "光",   color: "#f2f0d8" },
-    dark:    { id: "dark",    name: "闇",   color: "#8b6fd6" }
+    // 標準的な攻め手。灼熱の亀裂の主属性で、そこでは通りにくくなる
+    fire:    { id: "fire",    name: "火",   color: "#e8542a", order: 1 },
+
+    // 火と岩に強い。スライム系が得意とする
+    water:   { id: "water",   name: "水",   color: "#4fb0d1", order: 2 },
+
+    // 今後のステージで使い手と弱点を順次増やしていく。現在は出番が少ない
+    wind:    { id: "wind",    name: "風",   color: "#7fd9a8", order: 3 },
+
+    // 苔むす坑道では通りにくい（地の中の魔物が多いため、耐性持ちが5体・弱点0体）。
+    // 弱点は次のステージのモンスターで作る予定
+    earth:   { id: "earth",   name: "地",   color: "#c8a35e", order: 4 },
+
+    /**
+     * 雷 … 特別な属性。
+     *
+     * ・扱えるモンスターが少ない代わりに、技が他より強力
+     *   使い手はビリムシ1種だけ。技も「サンダー」（威力20/PP3）1つだけで、
+     *   他属性の基本技（威力15/PP2）とは枠を分けてある
+     * ・使い手が少ないぶん、耐性を持つモンスターも少ない
+     *   → 多くの相手に等倍以上で通る（現在は耐性持ち1体・弱点7体）
+     *
+     * ▼ 強さの釣り合いは PP で取る
+     *   威力を上げるかわりに消費PPを重くし、「強いが撃てる回数が少ない」形にする。
+     *   入手の難しさだけで縛ると、運が悪いと一生触れないので、
+     *   使い手は絞りつつ（1〜2種）、コストはPPで表現する。
+     */
+    thunder: { id: "thunder", name: "雷",   color: "#ffd75e", order: 5 },
+
+    // 闇と対をなす。坑道ではヒカリムシだけが強く耐える（光+7）
+    light:   { id: "light",   name: "光",   color: "#f2f0d8", order: 6 },
+
+    // 光と対をなす。夜行性・菌系が得意とする
+    dark:    { id: "dark",    name: "闇",   color: "#8b6fd6", order: 7 }
   };
 })(window.MyGame);

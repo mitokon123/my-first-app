@@ -267,10 +267,18 @@
     // 見出し（バージョン名）
     this.panel.drawText(version.version + "　" + (version.summary || ""),
       origin.x, origin.y + 16,
-      { color: this.focus === "notes" ? t.cursorColor : t.textColor });
+      { color: (this.focus === "notes") ? t.cursorColor : t.textColor });
 
     var lines = this._buildLines();
     var visible = this._visibleLines();
+
+    // まだ中身の無いバージョン（開発中）は、空欄に見えないよう一言出す
+    if (lines.length === 0) {
+      this.panel.drawText(this.texts.empty || "", origin.x, origin.y + 44,
+        { font: t.smallFont, color: t.hintColor });
+      return;
+    }
+
     var max = Math.max(0, lines.length - visible);
     if (this.scroll > max) this.scroll = max;
 

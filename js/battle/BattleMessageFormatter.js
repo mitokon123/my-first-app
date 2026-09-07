@@ -42,6 +42,9 @@
    * 対象の表示名。対象は行動した側の反対にいるので、side を反転して判断する。
    */
   BattleMessageFormatter.prototype._targetName = function (event) {
+    // targetSide が書かれていればそれに従う。
+    // 自分にかける技のように、対象が行動した側と同じこともあるため
+    if (event.targetSide) return this._decorate(event.targetName, event.targetSide === "enemy");
     return this._decorate(event.targetName, event.side === "ally");
   };
 
@@ -64,6 +67,8 @@
         return fill(t.enterField, { name: event.actorName });
       case "defend":
         return fill(t.defend, { actor: this._actorName(event) });
+      case "wait":
+        return fill(t.wait, { actor: this._actorName(event) });
       case "useSkill":
         return fill(t.useSkill, { actor: this._actorName(event), skill: event.skillName });
       case "miss":
@@ -80,6 +85,21 @@
         return fill(t.damage, { target: this._targetName(event), amount: event.amount });
       case "faint":
         return fill(t.faint, { target: this._targetName(event) });
+      case "modifier":
+        // 技ごとの言い回しがあればそれを使い、無ければ上がり／下がりの既定文
+        return fill(event.message ||
+                    (event.renewed ? t.modifierAgain
+                                   : (event.raised ? t.modifierUp : t.modifierDown)),
+                    { target: this._targetName(event), skill: event.skillName });
+      case "drain":
+        return fill(t.drained, { target: this._targetName(event), amount: event.healAmount });
+      case "heal":
+        return fill(t.healed, { target: this._targetName(event), amount: event.healAmount });
+      case "healFull":
+        return fill(t.healFull, { target: this._targetName(event) });
+      case "modifierEnd":
+        return fill(t.modifierEnd,
+                    { target: this._targetName(event), skill: event.skillName });
       case "expGained":
         return fill(t.expGained, { amount: event.amount });
       case "levelUp":

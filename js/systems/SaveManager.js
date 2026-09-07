@@ -51,6 +51,9 @@
       gold: state.gold || 0,
       discovery: state.discovery ? state.discovery.toSaveData() : null,
       clearedDungeons: state.clearedDungeons || null,
+      // 買った加護と、選択肢から外している加護（挑戦をまたいで残る）
+      boughtBlessings: state.boughtBlessings || null,
+      offBlessings: state.offBlessings || null,
       dungeon: state.dungeon || null
     };
 
@@ -109,6 +112,9 @@
         discovery: NS.Discovery.fromSaveData(payload.discovery),
         // 古いセーブには無いので、その場合は「何もクリアしていない」扱い
         clearedDungeons: payload.clearedDungeons || {},
+        // 古いセーブには無いので、その場合は「何も買っていない・何も外していない」扱い
+        boughtBlessings: payload.boughtBlessings || {},
+        offBlessings: payload.offBlessings || {},
         dungeon: payload.dungeon || null,
         savedAt: payload.savedAt || null
       }

@@ -13,15 +13,20 @@
   "use strict";
 
   var NOTICE_DURATION = 1600;
-  var USE_SCENE = "home";   // この画面で使えるアイテムの場面id（items.js の usableIn と対応）
 
   /**
    * @param {MyGame.Game} game
    * @param {object} returnScene 閉じたときに戻るシーン
+   * @param {string} [useScene] 使えるアイテムの場面id（data/items.js の usableIn と対応）
+   *   拠点なら "home"、探索中なら "dungeon"。省略すると "home"
+   * @param {function} [onEscape] 拠点へ帰るアイテムを使ったときに呼ばれる
+   *   （どう帰るかは開いた側が決める。ここは「使えた」ことだけを伝える）
    */
-  function ItemScene(game, returnScene) {
+  function ItemScene(game, returnScene, useScene, onEscape) {
     this.game = game;
     this.returnScene = returnScene;
+    this.useScene = useScene || "home";
+    this.onEscape = onEscape || null;
 
     var ui = game.data.ui || {};
     this.theme = ui.theme || {};
@@ -37,8 +42,7 @@
 
     this.phase = "list";
     this.targetIndex = 0;
-    this._notice = null;
-    this._noticeTimer = 0;
+    this.notice = new NS.Notice(this.theme.notice);
 
     this._rebuildList();
   }
@@ -78,10 +82,7 @@
   // --- 更新 ---
 
   ItemScene.prototype.update = function (dt) {
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
-    }
+    this.notice.update(dt);
 
     if (this.phase === "target") this._updateTarget();
     else this._updateList();
@@ -109,12 +110,41 @@
     var selected = this.list.getSelected();
     if (!selected) return;
 
-    if (!this.usage.isUsableIn(selected.value, USE_SCENE)) {
+    if (!this.usage.isUsableIn(selected.value, this.useScene)) {
       this._showNotice(this.texts.cannotUse || "");
       return;
     }
+
+    // 帰還の石のように相手を選ばないものは、その場で使う
+    if (!this.usage.needsTarget(selected.value)) {
+      this._useWithoutTarget(selected.value);
+      return;
+    }
+
     this.targetIndex = 0;
     this.phase = "target";
+  };
+
+  /**
+   * 相手を選ばずに使う。
+   * 拠点へ帰るものは、使えたことを画面の持ち主（探索画面）へ伝える。
+   */
+  ItemScene.prototype._useWithoutTarget = function (itemId) {
+    var escaping = this.usage.isEscape(itemId);
+    var result = this.usage.use(itemId, null, this.game.inventory);
+
+    if (!result.success) {
+      this._showNotice(this.texts.cannotUse || "");
+      return;
+    }
+
+    if (escaping && this.onEscape) {
+      this.onEscape();
+      return;   // 画面が切り替わるので、この先は何もしない
+    }
+
+    this._showNotice((this.texts.usedAlone || "{item}").replace("{item}", result.itemName));
+    this._rebuildList();
   };
 
   ItemScene.prototype._updateTarget = function () {
@@ -158,8 +188,7 @@
   };
 
   ItemScene.prototype._showNotice = function (text) {
-    this._notice = text;
-    this._noticeTimer = NOTICE_DURATION;
+    this.notice.show(text, NOTICE_DURATION);
   };
 
   // --- 描画 ---
@@ -172,7 +201,7 @@
     this._renderHeading();
 
     if (this.list.hasEntries()) {
-      this.list.render();
+      this.list.render(this.game.clock);
     } else {
       this.panel.drawBox(this.layout.list);
       var origin = this.panel.innerOrigin(this.layout.list);
@@ -283,14 +312,15 @@
   };
 
   ItemScene.prototype._renderNotice = function (ctx) {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
     var pos = this.layout.notice || { x: 400, y: 526 };
 
     ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
     ctx.font = "14px monospace";
     ctx.fillStyle = this.theme.cursorColor || "#ffd75e";
     ctx.textAlign = "center";
-    ctx.fillText(this._notice, pos.x, pos.y);
+    ctx.fillText(this.notice.getText(), pos.x, pos.y);
     ctx.restore();
   };
 

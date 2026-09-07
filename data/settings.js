@@ -23,10 +23,20 @@
     items: [
       // 戦闘の演出の速さ。1が最も遅く、8が最速。
       // 実際の倍率は data/ui.js の battle.animation.speedTable で決まる。
+      //   最も遅い 1240ms ／ 標準 620ms ／ 最速 221ms（出来事1つあたり）
+      // 「標準」が文章を読み切れる速さになるようにしてある。
       { id: "battleSpeed", label: "戦闘速度", type: "range",
         min: 1, max: 8, step: 1, default: 4,
         valueLabels: ["最も遅い", "遅い", "やや遅い", "標準",
                       "やや速い", "速い", "とても速い", "最速"] },
+
+      // 技の演出と、画面の揺れ・発光の濃さ。
+      // 実際の倍率は data/ui.js の battle.animation.effectScale で決まる。
+      // 0（全くなし）にすると演出そのものを出さないので、
+      // 光の点滅が苦手な人でも遊べる。
+      { id: "effectLevel", label: "エフェクトの濃さ", type: "range",
+        min: 0, max: 3, step: 1, default: 2,
+        valueLabels: ["全くなし", "薄め", "標準", "濃いめ"] },
 
       // マウスのホイールを1段回したときに動く行数。
       // 一覧の選択にも、図鑑の説明のスクロールにも同じだけ効く。

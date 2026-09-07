@@ -42,7 +42,7 @@
   };
 
   DungeonSelectScene.prototype.isUnlocked = function (dungeon) {
-    return NS.DungeonCatalog.isUnlocked(dungeon, this.game.clearedDungeons);
+    return NS.DungeonCatalog.isUnlocked(dungeon, this.game.clearedDungeons, this.game.data);
   };
 
   // --- 更新 ---
@@ -127,6 +127,20 @@
       { font: subtitle.font, color: subtitle.color });
   };
 
+  /**
+   * その場所のテーマ（色）を返す。まだ行けない場所は中身を見せないので null。
+   */
+  DungeonSelectScene.prototype._themeOf = function (dungeon, unlocked) {
+    if (!unlocked || !dungeon || !dungeon.theme) return null;
+    return (this.game.data.dungeonThemes || {})[dungeon.theme] || null;
+  };
+
+  /** 表示する名前。まだ行けない場所は伏せる */
+  DungeonSelectScene.prototype._nameOf = function (dungeon, unlocked) {
+    if (unlocked) return dungeon.name;
+    return this.texts.unknownName || "？？？";
+  };
+
   /** 一覧の1件を描く */
   DungeonSelectScene.prototype._renderRow = function (dungeon, i) {
     var L = this.layout.list;
@@ -139,14 +153,17 @@
     var selected = (i === this.index);
     var origin = this.panel.innerOrigin(rect);
 
+    this._renderThemeBar(rect, dungeon, unlocked);
+
     if (selected) {
       this.panel.drawText("▶", rect.x - 18, origin.y + 24, { color: t.cursorColor });
     }
 
-    // 未開放の場所は名前を伏せず、灰色にして「入れない」ことを示す
+    // 未開放の場所は名前を伏せ、灰色にして「まだ分からない」ことを示す
     var nameColor = !unlocked ? t.hintColor
                   : (selected ? t.cursorColor : t.textColor);
-    this.panel.drawText(dungeon.name, origin.x, origin.y + 18, { color: nameColor });
+    this.panel.drawText(this._nameOf(dungeon, unlocked), origin.x, origin.y + 18,
+      { color: nameColor });
 
     // 右上に状態（クリア済／未開放）
     var state = this.game.isDungeonCleared(dungeon.id) ? this.texts.cleared
@@ -157,12 +174,40 @@
           color: unlocked ? t.cursorColor : t.hintColor });
     }
 
-    this.panel.drawText(dungeon.subtitle || "", origin.x, origin.y + 40,
+    // 未開放なら、どんな場所かも伏せる
+    var subtitle = unlocked ? (dungeon.subtitle || "") : (this.texts.unknownName || "");
+    this.panel.drawText(subtitle, origin.x, origin.y + 40,
       { font: t.smallFont, color: t.subTextColor });
 
-    var floors = (this.texts.floorsLabel || "").replace("{floors}", dungeon.floors);
+    var floors = unlocked
+      ? (this.texts.floorsLabel || "").replace("{floors}", dungeon.floors)
+      : "";
     this.panel.drawText(floors, origin.x, origin.y + 58,
       { font: t.smallFont, color: t.hintColor });
+  };
+
+  /**
+   * 一覧の左端に、その場所の色の帯を出す。
+   * 一覧を眺めるだけで「緑の坑道・赤い亀裂・青い深層」と雰囲気が分かるようにする。
+   * まだ行けない場所は、雰囲気も伏せて一律の暗い色にする。
+   */
+  DungeonSelectScene.prototype._renderThemeBar = function (rect, dungeon, unlocked) {
+    var bar = this.layout.themeBar;
+    if (!bar || !bar.width) return;
+
+    var theme = this._themeOf(dungeon, unlocked);
+    var tiles = (theme && theme.tiles) || {};
+    var color = tiles.wall || this.layout.lockedColor || "#242a3a";
+
+    var ctx = this.game.ctx;
+    var gradient = ctx.createLinearGradient(0, rect.y, 0, rect.y + rect.h);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(1, tiles.floor || this.layout.lockedColor || "#242a3a");
+
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.fillRect(rect.x + 2, rect.y + 2, bar.width, rect.h - 4);
+    ctx.restore();
   };
 
   /**
@@ -181,14 +226,15 @@
     var t = this.theme;
     var origin = this.panel.innerOrigin(rect);
     var lh = rect.lineHeight || t.lineHeight || 18;
-    var y = origin.y + 20;
+    var unlocked = this.isUnlocked(dungeon);
 
-    this.panel.drawText(dungeon.name, origin.x, y);
-    y += lh + 4;
+    // 帯の下端から少し離して書き始める（帯と文章がくっつくと読みにくい）
+    var y = this._renderDetailBanner(rect, dungeon, unlocked) + lh + 6;
 
     // 解放されていなければ、必要な条件だけを出す
-    if (!this.isUnlocked(dungeon)) {
-      var required = NS.DungeonCatalog.requiredName(this.game.data, dungeon);
+    if (!unlocked) {
+      var required = NS.DungeonCatalog.requiredName(
+        this.game.data, dungeon, this.game.clearedDungeons);
       var hint = (this.texts.lockedHint || "").replace("{name}", required || "");
       this._renderLines(wrapText(hint, rect.charsPerLine || 15),
         origin.x, y, t.hintColor, lh);
@@ -217,6 +263,52 @@
       (this.texts.bossLabel || "") + " " +
       (known ? (boss.title || "") : (this.texts.unknownBoss || "")),
       origin.x, y, { font: t.smallFont, color: t.cursorColor });
+  };
+
+  /**
+   * 詳細欄の上部に、その場所の色の帯と名前を出す。
+   * 帯の色は実際のダンジョンの壁と床の色なので、潜る前に雰囲気が伝わる。
+   *
+   * 帯は下へ行くほど枠の色へ溶けるようにして、下端に線を引かない。
+   * 線を引くと文章のすぐ上に横線が走って、窮屈に見えるため。
+   *
+   * @returns {number} 帯の下端のy（続きはここから離して書く）
+   */
+  DungeonSelectScene.prototype._renderDetailBanner = function (rect, dungeon, unlocked) {
+    var origin = this.panel.innerOrigin(rect);
+    var banner = rect.banner;
+
+    if (!banner || !banner.height) {
+      var plainY = origin.y + 20;
+      this.panel.drawText(this._nameOf(dungeon, unlocked), origin.x, plainY);
+      return plainY;
+    }
+
+    var theme = this._themeOf(dungeon, unlocked);
+    var tiles = (theme && theme.tiles) || {};
+    var locked = this.layout.lockedColor || "#242a3a";
+
+    var ctx = this.game.ctx;
+    var top = rect.y + 2;
+    var bottom = top + banner.height;
+
+    // 上は壁の色、下は枠の色。境目が出ないよう、下端は透明にして溶かす
+    var gradient = ctx.createLinearGradient(0, top, 0, bottom);
+    gradient.addColorStop(0, tiles.wall || locked);
+    gradient.addColorStop(0.55, (theme && theme.background) || locked);
+    gradient.addColorStop(1, "rgba(0,0,0,0)");
+
+    ctx.save();
+    ctx.fillStyle = gradient;
+    ctx.fillRect(rect.x + 2, top, rect.w - 4, banner.height);
+    ctx.restore();
+
+    // 名前は帯の上寄りに置く（下は溶けているので、そこに文字を置くと沈んで見える）
+    this.panel.drawText(this._nameOf(dungeon, unlocked),
+      origin.x, top + Math.floor(banner.height * 0.42) + 6,
+      { color: unlocked ? this.theme.textColor : this.theme.hintColor });
+
+    return bottom;
   };
 
   /** 文字列の配列を1行ずつ描き、次の描画位置を返す */

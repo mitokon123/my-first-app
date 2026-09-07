@@ -30,13 +30,19 @@
     // "menu" … 通常のメニュー / "confirm" … 新しく始める前の確認
     this.phase = "menu";
 
-    this.particles = new NS.ParticleField(
-      this.layout.particles, game.canvas.width, game.canvas.height
+    // 粒子は奥・中・手前の3層。奥ほど遅く薄いので、重ねると奥行きが出る。
+    // 層の設定が無い場合は、これまでどおり1層だけで動く
+    this.particleLayers = NS.ParticleField.createLayers(
+      this.layout.particleLayers || [this.layout.particles],
+      game.canvas.width, game.canvas.height
     );
 
     this.saveManager = new NS.SaveManager(game.data);
-    this._notice = null;
-    this._noticeTimer = 0;
+    this.notice = new NS.Notice(this.theme.notice);
+
+    // 開いたときの明転。1度だけ流す（パッチノートから戻るたびには流さない）
+    this._introTimer = 0;
+    this._introPlayed = false;
 
     this._buildMenu();
   }
@@ -56,20 +62,32 @@
   };
 
   TitleScene.prototype.enter = function () {
-    this.elapsed = 0;
     this.phase = "menu";
+
+    if (this._introPlayed) return;
+    this._introPlayed = true;
+    this.elapsed = 0;
+    this._introTimer = (this.layout.intro || {}).duration || 0;
+  };
+
+  /** 明転の進み具合（0=まだ真っ暗 〜 1=終わり） */
+  TitleScene.prototype._introProgress = function () {
+    var duration = (this.layout.intro || {}).duration || 0;
+    if (duration <= 0 || this._introTimer <= 0) return 1;
+    return 1 - (this._introTimer / duration);
   };
 
   // --- 更新 ---
 
   TitleScene.prototype.update = function (dt) {
     this.elapsed += dt;
-    this.particles.update(dt);
+    if (this._introTimer > 0) this._introTimer -= dt;
 
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
+    for (var i = 0; i < this.particleLayers.length; i++) {
+      this.particleLayers[i].update(dt);
     }
+
+    this.notice.update(dt);
 
     if (this.phase === "confirm") this._updateConfirm();
     else this._updateMenu();
@@ -118,6 +136,8 @@
     this.game.gold = null;
     this.game.discovery = null;
     this.game.clearedDungeons = null;
+    this.game.boughtBlessings = null;
+    this.game.offBlessings = null;
     this.game.run = null;
     this.phase = "menu";
     this.game.scenes.change(new NS.HomeScene(this.game));
@@ -143,14 +163,15 @@
     this.game.gold = state.gold || 0;
     this.game.discovery = state.discovery;
     this.game.clearedDungeons = state.clearedDungeons || {};
+    this.game.boughtBlessings = state.boughtBlessings || {};
+    this.game.offBlessings = state.offBlessings || {};
     this.game.run = null;
 
     this.game.scenes.change(new NS.HomeScene(this.game));
   };
 
   TitleScene.prototype._showNotice = function (text) {
-    this._notice = text;
-    this._noticeTimer = NOTICE_DURATION;
+    this.notice.show(text, NOTICE_DURATION);
   };
 
   // --- 描画 ---
@@ -161,14 +182,55 @@
 
     this._renderBackground(ctx, w, h);
     this._renderAbyss(ctx);
-    this.particles.render(ctx);
+
+    for (var i = 0; i < this.particleLayers.length; i++) {
+      this.particleLayers[i].render(ctx);
+    }
+
+    this._renderVignette(ctx, w, h);
     this._renderLogo(ctx);
 
     if (this.phase === "confirm") this._renderConfirm(ctx);
-    else this.menu.render();
+    else this.menu.render(this.game.clock);
 
     this._renderNotice(ctx);
     this._renderFooter(ctx, w, h);
+    this._renderIntro(ctx, w, h);
+  };
+
+  /**
+   * 画面のふちを暗く落とす。中央の深淵へ視線が向くようにする。
+   * 粒子より手前・題字より奥に置くので、題字は暗くならない。
+   */
+  TitleScene.prototype._renderVignette = function (ctx, w, h) {
+    var v = this.layout.vignette;
+    if (!v) return;
+
+    var outer = Math.sqrt(w * w + h * h) / 2;
+    var gradient = ctx.createRadialGradient(
+      w / 2, h / 2, outer * (v.innerRatio || 0),
+      w / 2, h / 2, outer);
+
+    gradient.addColorStop(0, "rgba(0,0,0,0)");
+    gradient.addColorStop(1, v.color || "#000000");
+
+    ctx.save();
+    ctx.globalAlpha = (v.alpha === undefined) ? 1 : v.alpha;
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  };
+
+  /** 開いたときの明転。真っ暗から徐々に見えてくる */
+  TitleScene.prototype._renderIntro = function (ctx, w, h) {
+    var progress = this._introProgress();
+    if (progress >= 1) return;
+
+    ctx.save();
+    ctx.globalAlpha = 1 - progress;
+    ctx.fillStyle = this.layout.gradientBottom || "#000000";
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
   };
 
   /** 「新しく始める」の確認ウィンドウ */
@@ -195,7 +257,7 @@
 
     ctx.restore();
 
-    this.confirmMenu.render();
+    this.confirmMenu.render(this.game.clock);
   };
 
   /** 背景のたてグラデーション */
@@ -209,29 +271,42 @@
   };
 
   /**
-   * 奥へ続く同心円。ゆっくり明滅させて深さを感じさせる。
+   * 奥へ続く同心円。ゆっくり明滅させながら、外へ広がり続ける。
+   *
+   * 円は中心から湧いて外へ流れていくので、こちらが落ちていくように見える。
    * 外側の円ほど薄くすることで、下へ行くほど暗くなる深淵らしさを出す。
+   * 湧いた直後と消える直前は薄くして、入れ替わりを目立たせない。
    */
   TitleScene.prototype._renderAbyss = function (ctx) {
     var a = this.layout.abyss;
     if (!a) return;
+
+    var rings = a.rings || 0;
+    if (rings <= 0) return;
 
     var minAlpha = a.minAlpha === undefined ? 0.1 : a.minAlpha;
     var maxAlpha = a.maxAlpha === undefined ? 0.4 : a.maxAlpha;
     var center = (minAlpha + maxAlpha) / 2;
     var amplitude = (maxAlpha - minAlpha) / 2;
 
+    // 何個ぶん外へ進んだか（0〜rings を繰り返す）
+    var advance = (this.elapsed * (a.expandSpeed || 0)) % rings;
+
     ctx.save();
     ctx.strokeStyle = a.color || "#223355";
     ctx.lineWidth = a.lineWidth || 1;
 
-    for (var i = 0; i < (a.rings || 0); i++) {
-      var radius = (a.baseRadius || 0) + (a.ringGap || 0) * i;
+    for (var i = 0; i < rings; i++) {
+      var slot = (i + advance) % rings;
+      var radius = (a.baseRadius || 0) + (a.ringGap || 0) * slot;
+
       // 円ごとに位相をずらして明滅させる
       var phase = this.elapsed * (a.pulseSpeed || 0) + i * 0.8;
-      var fade = 1 - (a.fadePerRing || 0) * i;
+      var fade = 1 - (a.fadePerRing || 0) * slot;
+      var edge = Math.min(1, slot, rings - slot);   // 両端で0になる
 
-      ctx.globalAlpha = Math.max(0, (center + amplitude * Math.sin(phase)) * fade);
+      ctx.globalAlpha = Math.max(0,
+        (center + amplitude * Math.sin(phase)) * fade * edge);
       ctx.beginPath();
       ctx.arc(a.centerX, a.centerY, radius, 0, Math.PI * 2);
       ctx.stroke();
@@ -245,14 +320,26 @@
     var config = this.game.data.config || {};
 
     // ゲーム名（文字間を空けて重厚に見せる）
+    //   ゆっくり浮き沈みし、光のにじみも合わせて増減させる。
+    //   開いた直後は少し下から上がってくる
     var logo = L.logo || {};
+    var clock = this.game.clock;
+    var progress = this._introProgress();
+    var rise = (1 - progress) * ((L.intro || {}).riseY || 0);
+
     ctx.save();
     ctx.font = logo.font || "40px monospace";
     ctx.fillStyle = logo.color || "#ffffff";
     ctx.textAlign = "center";
     ctx.shadowColor = logo.glowColor || "transparent";
-    ctx.shadowBlur = logo.glowBlur || 0;
-    drawSpacedText(ctx, config.gameTitle || "", logo.x, logo.y, logo.letterSpacing || 0);
+    ctx.shadowBlur = Math.max(0,
+      NS.Motion.value(logo.glowPulse, clock, 0, logo.glowBlur || 0));
+    ctx.globalAlpha = progress;
+
+    drawSpacedText(ctx, config.gameTitle || "",
+      logo.x,
+      logo.y + rise + NS.Motion.value(logo.float, clock, 0, 0),
+      logo.letterSpacing || 0);
     ctx.restore();
 
     // 世界名
@@ -275,13 +362,15 @@
   };
 
   TitleScene.prototype._renderNotice = function (ctx) {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
+
     var pos = this.layout.notice || { x: 320, y: 392 };
     ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
     ctx.font = "13px monospace";
     ctx.fillStyle = this.theme.cursorColor || "#ffd75e";
     ctx.textAlign = "center";
-    ctx.fillText(this._notice, pos.x, pos.y);
+    ctx.fillText(this.notice.getText(), pos.x, pos.y);
     ctx.restore();
   };
 

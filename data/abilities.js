@@ -86,6 +86,28 @@
       ]
     },
 
+    // 雷を扱えるのはビリムシだけなので、この特性を持つのも今はその1種だけ
+    charged: {
+      id: "charged",
+      name: "帯電",
+      category: "damage",
+      description: "体に電気をためており、雷属性の技の威力が上がる。",
+      effects: [
+        { type: "damageDealt", value: 1.25, element: "thunder" }
+      ]
+    },
+
+    // 発光（光）と対になる闇のほう。倍率は炎の魂・発光とそろえてある
+    duskborn: {
+      id: "duskborn",
+      name: "宵闇",
+      category: "damage",
+      description: "闇をまとっており、闇属性の技の威力が上がる。",
+      effects: [
+        { type: "damageDealt", value: 1.25, element: "dark" }
+      ]
+    },
+
     thickSkin: {
       id: "thickSkin",
       name: "厚い皮膚",
@@ -97,6 +119,18 @@
     },
 
     // --- 複数の効果を持つ例 ---
+
+    brittleShell: {
+      id: "brittleShell",
+      name: "ひび割れ",
+      category: "damage",
+      description: "体にひびが入っている。守りは固いが、地の技を受けると砕けやすい。",
+      effects: [
+        { type: "statMultiplier", stat: "defense", value: 1.2 },
+        // 耐性（地-3 = ×1.6）にさらに掛かるので、地の技は合計 ×1.92 になる
+        { type: "damageTaken", value: 1.2, element: "earth" }
+      ]
+    },
 
     wildInstinct: {
       id: "wildInstinct",

@@ -22,16 +22,23 @@
       confirm:    ["Enter", "Space", "KeyZ"],
       cancel:     ["Escape", "KeyX"],
       party:      ["KeyP", "Tab"],
+      items:      ["KeyI"],
       store:      ["KeyQ"],
       equip:      ["KeyE"],
-      save:       ["KeyF"],
-      regenerate: ["KeyR"]
+      // 上段のタブ（店の切り替えなど）。画面によって Q/E の意味が変わるが、
+      // 同時に両方の意味を持つ画面は無いのでぶつからない
+      prevTab:    ["KeyQ"],
+      nextTab:    ["KeyE"],
+      save:       ["KeyF"]
+      // regenerate（R でマップ作り直し）は生成の確認用だったので外した。
+      // また要るときは "regenerate": ["KeyR"] を戻し、
+      // DungeonScene.update に呼び出しを足せばよい
     },
 
     preventDefault: ["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Tab"],
 
     order: ["up", "down", "left", "right", "confirm", "cancel",
-            "party", "store", "equip", "save", "regenerate"],
+            "party", "items", "store", "equip", "prevTab", "nextTab", "save"],
 
     actionLabels: {
       up:         "上へ移動",
@@ -41,16 +48,19 @@
       confirm:    "決定",
       cancel:     "取消 / 戻る",
       party:      "仲間（編成）",
+      items:      "持ち物（探索中）",
       store:      "預かり所へ預ける",
       equip:      "装備を着け替える",
-      save:       "セーブ",
-      regenerate: "ダンジョン再生成"
+      prevTab:    "左のタブへ（店を変える）",
+      nextTab:    "右のタブへ（店を変える）",
+      save:       "セーブ"
     },
 
     keyLabels: {
       ArrowUp: "↑", ArrowDown: "↓", ArrowLeft: "←", ArrowRight: "→",
       KeyW: "W", KeyA: "A", KeyS: "S", KeyD: "D",
       KeyZ: "Z", KeyX: "X", KeyP: "P", KeyQ: "Q", KeyE: "E", KeyF: "F", KeyR: "R",
+      KeyI: "I",
       Enter: "Enter", Space: "Space", Escape: "Esc", Tab: "Tab"
     }
   };

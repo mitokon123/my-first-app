@@ -17,13 +17,34 @@
     battle: {
       encounter:    "野生の {name} が現れた!",              // name
       useSkill:     "{actor} の {skill}!",                  // actor, skill
+      wait:         "{actor} は ようすを みている...",       // actor
       miss:         "しかし {target} には当たらなかった!",  // target
       critical:     "会心の一撃!",
-      effective:    "効果は抜群だ!",
-      resisted:     "効果はいまひとつだ...",
+
+      // 相性の良し悪しは文章では知らせない（空にすると、その行は出なくなる）。
+      // 数字と画面の効果で伝える。
+      //   抜群 … 橙に光って揺れる／いまひとつ … 数字が小さく灰色になる
+      // 文章で出したくなったら、ここに文言を書き戻すだけでよい。
+      effective:    "",
+      resisted:     "",
+
+      // 「効かない」はダメージ0の理由が分からなくなるため残す
       immune:       "{target} には効かない!",               // target
       damage:       "{target} に {amount} のダメージ!",     // target, amount
       faint:        "{target} は倒れた!",                   // target
+
+      // バフ／デバフ（data/skills.js の modifier）。
+      // 技ごとの言い回しは skills.js の modifier.message に書ける。
+      // 書かなかった技は、ここの文がそのまま使われる
+      modifierUp:   "{target} は {skill} で 力を高めた!",    // target, skill
+      modifierDown: "{target} は {skill} で 力を そがれた!", // target, skill
+      modifierAgain:"{target} の {skill} を かけ直した!",    // target, skill
+      modifierEnd:  "{target} の {skill} の効果が切れた。",  // target, skill
+      // 与えたダメージの一部を自分のHPに変える技（data/skills.js の drain）
+      drained:      "{target} は {amount} 吸い取った!",      // target, amount
+      // HPを回復する技（data/skills.js の heal）
+      healed:       "{target} の HPが {amount} 回復した!",   // target, amount
+      healFull:     "しかし {target} は 元気なままだ",       // target
       expGained:    "{amount} の経験値を獲得!",             // amount
       goldGained:   "{amount}G を手に入れた!",              // amount
       levelUp:      "{actor} はレベル {level} に上がった!", // actor, level
@@ -71,6 +92,7 @@
       fight:   "技",
       defend:  "防御",
       scout:   "スカウト",
+      swap:    "交代",
       item:    "道具",
       flee:    "逃げる",
       back:    "戻る"
@@ -85,10 +107,24 @@
       selectItem:  "どの道具?",
       noItems:     "使える道具がない",
       notEnoughPp: "PPが足りない!",
+
+      // 掛かっている強化・弱体を、名前の横に出すときの短い印。
+      // 「防↑」のように、statMarks の文字と markUp / markDown をつないで作る
+      statMarks:   { hp: "HP", attack: "攻", defense: "防", speed: "速", pp: "PP" },
+      markUp:      "↑",
+      markDown:    "↓",
+      markOther:   "効",   // ステータスではなく与ダメージ・被ダメージが変わるもの
+
       itemUsed:    "{actor} は {item} を使った!",            // actor, item
       itemHealed:  "{name} の HPが {amount} 回復した!",      // name, amount
       itemNoEffect:"しかし 効果がなかった",
       enterField:  "{name} が 前に出た!",                    // name
+      // 交代（その仲間のこのターンの行動になる）
+      selectSwap:  "だれと交代する?",
+      noReserve:   "控えの仲間がいない",
+      swapped:     "{out} は 下がり {in} が 前に出た!",       // out, in
+      swapFailed:  "交代できなかった",
+      hintSwap:    "↑↓: 選ぶ    決定: 交代    Esc: 戻る",
       speedOrder:  "素早さ順に行動!",
       hintCommand: "↑↓: 選択    決定: 決定    Esc: 前の仲間へ",
       hintTarget:  "↑↓: 相手を選ぶ    決定: 決定    Esc: 戻る",
@@ -116,6 +152,7 @@
     patchNote: {
       title:     "パッチノート",
       subtitle:  "これまでの更新",
+      empty:     "このバージョンはまだ開発中です。",
       hintList:  "↑↓: バージョン    →/決定: 内容を読む    Esc: 戻る",
       hintNotes: "↑↓: 読み進める    ←: バージョン一覧へ    Esc: 戻る"
     },
@@ -142,11 +179,14 @@
       party:      "仲間",
       shop:       "ショップ",
       craft:      "工房",
+      blessing:   "加護を選ぶ",
       items:      "持ち物",
       dex:        "図鑑",
       save:       "セーブ",
       settings:   "設定",
       comingSoon: "{name} は準備中",                        // name
+      locked:     "{name} は {required} をクリアすると使える", // name, required
+      lockedShort:"{name} はまだ使えない",                   // name
       statusTitle:"パーティ",
       emptyParty: "仲間がいない",
       hint:       "↑↓: 選択    決定: 決定    Esc: タイトルへ"
@@ -182,7 +222,18 @@
       notOwned:     "持っていない",
       noStock:      "並んでいる品物がない",
       nothingToSell:"売れるものがない",
+      // 加護を売る店（data/shop.js の type: "blessing"）
+      owned:          "所持",
+      noBlessings:    "売り物がない",
+      confirmBlessing:"{name} を {price}Gで買いますか?",   // name, price
+      blessingBought: "{name} を {price}Gで手に入れた",   // name, price
+      // 選択肢に入れておける数がいっぱいのとき、続けて出す
+      blessingFull:   "（選択肢がいっぱい。拠点で入れ替える）",
+      already:        "もう持っている",
+      notForSale:     "これは売り物ではない",
       hint:         "↑↓: 選択    ←→: 買う / 売る    決定: 決定    Esc: 戻る",
+      // 2軒以上開いているときだけ、店の移動を案内する
+      hintShops:    "↑↓: 選択    ←→: 買う/売る    Q/E: 店を変える    決定: 決定    Esc: 戻る",
       hintQuantity: "↑↓: 1個ずつ    ←→: 10個ずつ    決定: 確認へ    Esc: やめる",
       hintConfirm:  "↑↓: 選択    決定: 決定    Esc: 個数へ戻る"
     },
@@ -205,6 +256,25 @@
       hintConfirm:  "↑↓: 選択    決定: 決定    Esc: やめる"
     },
 
+    /** 加護を選ぶ画面（拠点） */
+    blessingSelect: {
+      title:      "加護を選ぶ",
+      subtitle:   "潜ったときに選択肢へ出る加護を決める",
+      count:      "編成 {active}/{max}",           // active, max
+      markOn:     "◆ ",   // 入れている加護の印
+      markOff:    "・ ",   // 外している加護の印
+      rarityLabel:"出やすさ",
+      stateOn:    "選択肢に入れている",
+      stateOff:   "選択肢から外している",
+      turnedOn:   "{name} を選択肢に入れた",       // name
+      turnedOff:  "{name} を選択肢から外した",     // name
+      // 上限に達しているとき。どれかを外してから、と伝える
+      full:       "編成は{max}個まで。どれかを外してから入れる",  // max
+      notOwned:   "まだ持っていない",
+      empty:      "持っている加護がない",
+      hint:       "↑↓: 選択    決定: 入れる / 外す    Esc: 戻る"
+    },
+
     /** 設定画面 */
     settings: {
       title:        "設定",
@@ -212,7 +282,7 @@
       volumeTitle:  "ゲーム設定",
       keysTitle:    "操作キー",
       audioNote:    "※ 音量は音声が未実装のため、保存のみ行われます",
-      hint:         "↑↓: 選択    ←→: 変更    Esc: 戻る",
+      hint:         "↑↓: 選択    ←→: 変更    Q/E・ホイール: 操作キーを送る    Esc: 戻る",
       saved:        "設定を保存しました",
       saveFailed:   "設定を保存できませんでした"
     },
@@ -226,6 +296,7 @@
       slotsLabel:  "種類 {used}/{max}",              // used, max
       selectTarget:"だれに使う?",
       used:        "{name} の HPが {amount} 回復した!", // name, amount
+      usedAlone:   "{item} を使った",                   // item（相手を選ばないもの）
       noEffect:    "しかし 効果がなかった",
       cannotUse:   "ここでは使えない",
       hintList:    "↑↓: 選択    決定: 使う    Esc: 戻る",
@@ -233,12 +304,22 @@
     },
 
     /** 図鑑画面 */
+    /** 名前をつける文字盤 */
+    naming: {
+      titleRename: "{name} の名前を決める",   // name（いまの名前）
+      titleNew:    "{name} に名前をつける",   // name（種族名）
+      hint:        "↑↓←→: 選ぶ    決定: 入れる    Q/E: かな切替    Esc: 1文字消す",
+      renamed:     "{old} は {new} になった!", // old, new
+      keptName:    "名前はそのままにした。"
+    },
+
     dex: {
       title:        "図鑑",
       subtitle:     "出会ったモンスターと手に入れたアイテム",
       tabMonsters:  "モンスター",
       tabItems:     "アイテム",
       tabAbilities: "特性",
+      tabSkills:    "技",
       tabNatures:   "性格",
       tabBlessings: "加護",
       totalLabel:   "全",
@@ -247,7 +328,18 @@
       natureNote:   "性格は仲間になったときに決まり、あとから変わらない。",
       blessingNote: "加護はダンジョンで階を降りるたびに選ぶ。その挑戦のあいだだけ効く。",
       unknownAbility: "まだ見たことがない特性。",
+      unknownSkill: "まだ見たことがない技。",
       ownerLabel:   "持っているモンスター",
+      learnerLabel: "覚えるモンスター",
+      powerLabel:   "威力",
+      powerNormal:  "通常攻撃と同じ",
+      powerNone:    "なし",            // バフ／デバフ技（ダメージを与えない）
+      modifierLabel:"効果",
+      durationLabel:"{n}ターン",       // n
+      selfTarget:   "（自分にかける）",
+      ppLabel:      "消費PP",
+      accuracyLabel:"命中",
+      criticalLabel:"会心",
       knownLabel:   "判明",
       unknownName:  "???",
       unknownDesc:  "まだ出会っていない。",
@@ -259,6 +351,8 @@
       elementLabel: "属性",
       scoutLabel:   "スカウト率",
       resistanceLabel: "耐性",
+      // 落とすもの。一度仲間にすると、その種族から取れるものが全て見える
+      dropLabel:    "落とすもの",
       notCaught:    "（未加入）",
       hint:          "↑↓: 選択    ←→: 切替    Esc: 戻る",
       hintScrollable:"↑↓: 選択    ←→: 切替    決定: 説明を読む    Esc: 戻る",
@@ -273,6 +367,8 @@
       cleared:    "クリア済",
       locked:     "未開放",
       lockedHint: "{name} をクリアすると挑める", // name
+      // まだ開放されていない場所は、名前も雰囲気も伏せる
+      unknownName: "？？？",
       monstersLabel:"出現するモンスター",
       dropsLabel: "手に入るもの",
       noDrops:    "まだ分かっていない",
@@ -289,6 +385,12 @@
       spring:       "澄んだ泉がわいている。",
       springHealed: "仲間のHPとPPが回復した!",
       springFull:   "しかし 誰も疲れていなかった",
+      // 使うかどうかを聞くとき（data/features.js の confirm: true）
+      //   〇〇Prompt の 〇〇 は仕掛けのid。新しい仕掛けにも同じ書き方で足せる
+      springPrompt: "澄んだ泉がわいている。\n水を浴びますか?",
+      springSkipped:"泉には手をつけなかった",
+      confirmYes:   "使う",
+      confirmNo:    "やめておく",
       trap:         "罠を踏んでしまった!",
       trapHit:      "仲間はダメージを受けた!",
       trapNoEffect: "しかし 誰にも当たらなかった"
@@ -302,6 +404,21 @@
       hint:       "↑↓: 選択    決定: 決める"
     },
 
+    /** 挑戦の結果画面（拠点へ戻る前に出る） */
+    result: {
+      escaped:     "帰還",
+      cleared:     "討伐",
+      scouted:     "勧誘",
+      defeated:    "全滅",
+      reached:     "{name}  B{floor}F まで",              // name, floor
+      gold:        "手に入れたゴールド  {amount}G",       // amount
+      gainedLabel: "持ち帰ったもの",
+      lostLabel:   "落としてきたもの",
+      nothing:     "何も持ち帰れなかった",
+      toHome:      "拠点へ",
+      hint:        "↑↓・ホイール: 送る    決定/クリック: 拠点へ"
+    },
+
     /** 1回の挑戦（ラン）の結果 */
     run: {
       lostItems:  "拾ったものを落としてしまった... {list}",  // list
@@ -311,11 +428,23 @@
     },
 
     dungeon: {
+      // 地図に重ねるボタン（キーボードの P / I と同じ）
+      buttonParty: "仲間",
+      buttonItems: "持ち物",
+
+      // 階段で出す問いかけ（ここでしか引き返せない）
+      stairsPrompt:  "下へ続く階段がある。\nどうする?",
+      bossPrompt:    "この先に強い気配がする。\nどうする?",
+      choiceDescend: "次の階へ降りる",
+      choiceFight:   "主に挑む",
+      choiceReturn:  "拠点へ戻る",
+      choiceStay:    "まだ残る",
+      cannotLeave:   "ここからは戻れない（階段か 帰還の石が要る）",
       descend:   "B{floor}F へ降りた",                      // floor
       bossAhead: "強い気配がする...",
       returned:  "拠点へ戻った",
       // 画面下部の情報欄
-      infoBar:   "{name} B{floor}F/{floors}F   移動:WASD/矢印   仲間:P   セーブ:F   拠点:Esc"
+      infoBar:   "{name} B{floor}F/{floors}F  移動:WASD/矢印  仲間:P  持ち物:I  セーブ:F"
     },
 
     boss: {
@@ -344,6 +473,7 @@
       actionDeposit:"預かり所へ預ける",
       actionTake:   "パーティに加える",
       actionReorder:"並び替える",
+      actionName:    "名前を変える",
       actionEquip:  "装備",
       actionCancel: "やめる",
 
@@ -352,6 +482,9 @@
       storageFull: "預かり所がいっぱいだ",
       partyFull:   "パーティがいっぱい（先に誰かを預ける）",
       cannotStoreLast: "最後の1体は預けられない",
+
+      // 耐性（装備の分まで足したあとの値を全属性ぶん出す）
+      resistanceLabel: "耐性（装備込み）",
 
       // 装備
       equipLabel:   "装備",
@@ -366,6 +499,8 @@
       allElements:  "全",
 
       hintNormal:  "↑↓: 選択    ←→: 表の切替    決定: この仲間を選ぶ    Esc: 閉じる",
+      // 探索中（預かり所へ手が届かないとき）
+      hintNoStorage: "↑↓: 選択    決定: この仲間を選ぶ    Esc: 探索へ戻る",
       hintAction:  "↑↓: 選択    決定: 決定    Esc: やめる",
       hintReorder: "↑↓: 移動先を選ぶ    決定: そこへ入れ替え    Esc: やめる",
       hintStorageEmpty: "預けている仲間はいない    ←→: パーティへ",

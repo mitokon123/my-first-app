@@ -23,7 +23,9 @@
    * @param {object[]} enemies 敵
    * @param {object} returnScene 戦闘終了後に戻るシーン
    * @param {function(string):boolean} [onFinish] 結果を受け取るコールバック
-   * @param {object} [options] { allowScout, allowFlee, introMessage }
+   * @param {object} [options] { allowScout, allowFlee, scoutLevel, introMessage }
+   *   scoutLevel … 仲間になったときのレベル。省略すると戦っていたレベルのまま。
+   *                ボスのように、戦う強さと仲間にしたときの強さを分けたいときに使う
    */
   function BattleScene(game, allySource, enemies, returnScene, onFinish, options) {
     options = options || {};
@@ -38,6 +40,7 @@
 
     this.allowScout = options.allowScout !== false;
     this.allowFlee = options.allowFlee !== false;
+    this.scoutLevel = options.scoutLevel;
     this.introMessage = options.introMessage || null;
 
     var ui = game.data.ui || {};
@@ -62,6 +65,20 @@
     this.animator = new NS.BattleAnimator(animation);
     this.floatingText = new NS.FloatingText(animation.popup);
     this.screenEffects = new NS.ScreenEffects(animation);
+    // 踏み込み・のけぞりのような「1回だけ流れる動き」を覚えておく
+    this.actionMotions = new NS.MotionPlayer(game.data);
+    // 倒れる動きを流した相手。流し終えたら姿を消すために覚えておく
+    this._faintPlayed = [];
+
+    // 技を当てたときの演出。いま出している技を覚えて、命中したところで出す
+    this.skillEffects = new NS.EffectPlayer(game.data);
+    this._currentSkill = null;
+
+    // 戦っている場所の背景。挑戦中のダンジョンから引く（data/dungeonThemes.js の battle）
+    this.scenery = this._findScenery();
+    this.sceneryParticles = (this.scenery && this.scenery.particles)
+      ? new NS.ParticleField(this.scenery.particles, game.canvas.width, game.canvas.height)
+      : null;
 
     // 1ターン分の出来事を1つずつ見せるための状態
     this.playbackEvents = [];
@@ -90,6 +107,10 @@
     this.pendingScout = null;
     this._scoutError = null;  // 行き先へ入れられなかった理由
 
+    // 画面に出しているバフ／デバフの印。
+    // 実際の効果（monster.modifiers）より遅れて増減する（_shownModifiersFor を参照）
+    this.shownModifiers = [];
+
     // 技以外の行動は、正しい行動順のタイミングでここに処理が回ってくる
     var self = this;
     this.system.onNonSkillAction = function (step, events) {
@@ -101,6 +122,11 @@
     this.system.start(this.allies, this.enemies);
     this._assignEnemyLabels();
     this._recordEnemiesSeen();
+
+    // 設定「エフェクトの濃さ」を演出に渡す（戦闘に入るたびに読み直す）
+    if (this.skillEffects.setIntensity) {
+      this.skillEffects.setIntensity(this._effectIntensity());
+    }
 
     // 開始時はHPバーを実際の値に合わせておく
     this.animator.snap(this.allies);
@@ -172,6 +198,10 @@
     ];
 
     if (this.allowScout) items.push({ label: labels.scout || "scout", value: "scout" });
+    // 控えがいるときだけ「交代」を出す（選べない項目を並べない）
+    if (this._reserveMembers().length > 0) {
+      items.push({ label: labels.swap || "swap", value: "swap" });
+    }
     items.push({ label: labels.item || "item", value: "item" });
     if (this.allowFlee) items.push({ label: labels.flee || "flee", value: "flee" });
 
@@ -213,6 +243,40 @@
     return !!(actor && actor.canPayPp && actor.canPayPp(cost));
   };
 
+  /**
+   * 控えにいる仲間。盤面に出ておらず、まだ倒れていない者。
+   * 倒れている仲間は前に出せない。
+   */
+  BattleScene.prototype._reserveMembers = function () {
+    var field = this.system.getFieldAllies();
+    var members = this._partyMembers();
+    var reserves = [];
+
+    for (var i = 0; i < members.length; i++) {
+      if (field.indexOf(members[i]) >= 0) continue;
+      if (members[i].isFainted && members[i].isFainted()) continue;
+      reserves.push(members[i]);
+    }
+    return reserves;
+  };
+
+  /** 交代先の候補を並べる */
+  BattleScene.prototype._buildSwapMenu = function () {
+    var reserves = this._reserveMembers();
+    var rows = [];
+
+    for (var i = 0; i < reserves.length; i++) {
+      rows.push({
+        type: "entry",
+        label: reserves[i].getName() + "  Lv" + reserves[i].level,
+        right: "HP" + reserves[i].currentHp + "/" + reserves[i].getMaxHp(),
+        // 番号ではなく個体そのものを覚える（並びが変わっても選んだ相手と交代できる）
+        value: reserves[i]
+      });
+    }
+    this.subMenu.setRows(rows);
+  };
+
   /** 戦闘中に使える道具だけを並べる */
   BattleScene.prototype._buildItemMenu = function () {
     var inventory = this.game.inventory;
@@ -247,12 +311,16 @@
     this.animator.update(scaled, this.enemies);
     this.floatingText.update(scaled);
     this.screenEffects.update(scaled);
+    this.actionMotions.update(this.game.clock);
+    this.skillEffects.update(this.game.clock);
+    if (this.sceneryParticles) this.sceneryParticles.update(scaled);
 
     switch (this.phase) {
       case "playback": this._updatePlayback(scaled, input); break;
       case "message":  this._updateMessage(input); break;
       case "command":  this._updateCommand(input); break;
       case "skill":    this._updateSkill(input); break;
+      case "swap":     this._updateSwap(input); break;
       case "item":     this._updateItem(input); break;
       case "target":   this._updateTarget(input); break;
       case "scoutChoice": this._updateScoutChoice(input); break;
@@ -352,7 +420,10 @@
   BattleScene.prototype._animationSettled = function () {
     return this.animator.isSettled(this.allies)
         && this.animator.isSettled(this.enemies)
-        && !this.floatingText.isActive();
+        && !this.floatingText.isActive()
+        // 倒れきる前・技の演出が消えきる前に戦闘を終わらせない
+        && !this.actionMotions.isBusy(this.game.clock)
+        && !this.skillEffects.isBusy(this.game.clock);
   };
 
   /** 出来事を1つ見せて、次までの待ち時間を決める */
@@ -367,6 +438,9 @@
     if (event.revealTarget) {
       this.animator.revealTo(event.revealTarget, event.revealHp);
     }
+
+    this._playActionMotion(event);
+    this._playSkillEffect(event);
 
     switch (event.type) {
       case "damage":
@@ -392,6 +466,14 @@
       case "faint":
         this._applyStyle("faint", event.target, null);
         break;
+      // 効果は takeTurn の時点でもう掛かっているが、
+      // 印は「その出来事を見せた瞬間」に出す（HPバーと同じ考え方）
+      case "modifier":
+        this._revealModifier(event);
+        break;
+      case "modifierEnd":
+        this._hideModifier(event);
+        break;
       default:
         // 道具などによる回復
         if (event.healAmount) {
@@ -402,6 +484,236 @@
     }
 
     this.playbackTimer = wait;
+  };
+
+  /**
+   * その相手の絵を描くべきか。
+   *
+   * 倒れる動きは「見た目のHPが0になったあと」に始まるので、
+   * HPが0になった瞬間に消してしまうと、消えてから倒れることになる。
+   * そこで、倒れる動きを持っている相手は
+   *   HPが0になっても残す → 倒れる動きを流す → 流し終えたら消す
+   * の順にする。動きを持っていない相手は、今までどおりその場で消える。
+   */
+  BattleScene.prototype._shouldShowSprite = function (monster, shownHp, action) {
+    if (action) return true;        // 何か動いている最中
+    if (shownHp > 0) return true;   // まだ立っている
+
+    if (this._hasFallen(monster)) return false;   // 倒れ終わった
+    return this._awaitsFaint(monster);            // 倒れる動きを待っているところ
+  };
+
+  /** 倒れる動きを流し終えたか */
+  BattleScene.prototype._hasFallen = function (monster) {
+    if (this._faintPlayed.indexOf(monster) < 0) return false;
+    return !this.actionMotions.isPlaying(monster, this.game.clock);
+  };
+
+  /** 倒れる動きを持っていて、まだ流していないか */
+  BattleScene.prototype._awaitsFaint = function (monster) {
+    if (!monster.getActionMotionId) return false;
+    if (!monster.getActionMotionId("faint")) return false;
+    return this._faintPlayed.indexOf(monster) < 0;
+  };
+
+  /**
+   * 1体分の絵を描く。3つの動きを重ねる。
+   *   ふだんの動き（浮く・呼吸する）
+   *   ＋ 防御中の姿勢（防御しているあいだ続く）
+   *   ＋ 1回だけの動き（踏み込む・のけぞる・倒れる）
+   */
+  BattleScene.prototype._renderMemberSprite = function (monster, x, y, size, action) {
+    var sprite = monster.getSpriteId();
+    var clock = this.game.clock;
+
+    var transform = NS.Motion.forSprite(this.game.data, sprite,
+      monster.getMotionId(), clock, monster.getMotionPhase());
+
+    // 防御中は構えた姿勢を重ねる（_defending は BattleSystem が立てる）
+    if (monster._defending && monster.getActionMotionId) {
+      var guardId = monster.getActionMotionId("guard");
+      if (guardId) {
+        transform = NS.Motion.combine(transform,
+          NS.Motion.of(this.game.data, guardId, clock, monster.getMotionPhase()));
+      }
+    }
+
+    this.spriteRenderer.drawMotion(sprite, x, y, size, size,
+      NS.Motion.combine(transform, action));
+  };
+
+  /**
+   * 出来事に合わせて、踏み込み・のけぞりの動きを始める。
+   *
+   * どの動きになるかは data/motions.js の motionDefaults が決めるので、
+   * ここでは種族を区別しない。
+   */
+  BattleScene.prototype._playActionMotion = function (event) {
+    // 相手のいる向き。敵は上段・味方は下段なので、味方は上へ、敵は下へ動く
+    var toward = (event.side === "ally") ? -1 : 1;
+
+    if (event.type === "useSkill" && event.actor) {
+      var kind = this._skillMotionKind(event.skill);
+      // 自分・味方にかける技は相手の位置と関係がないので、向きを固定する
+      this._startMotion(event.actor, kind, kind === "buff" ? 1 : toward);
+      return;
+    }
+
+    // 押された相手は、攻撃してきた方向へ飛ぶ（＝踏み込みと同じ向き）
+    if (event.type === "damage" && event.target) {
+      this._startMotion(event.target, "hit", toward);
+      return;
+    }
+
+    // 倒れる・回復・レベルアップは、相手の位置と関係なく同じ向きに動く
+    if (event.type === "faint" && event.target) {
+      // 流したことを覚えておく。流し終えたら姿を消す判断に使う
+      if (this._faintPlayed.indexOf(event.target) < 0) {
+        this._faintPlayed.push(event.target);
+      }
+      this._startMotion(event.target, "faint", 1);
+      return;
+    }
+    if (event.type === "levelUp" && event.actor) {
+      this._startMotion(event.actor, "levelUp", 1);
+      return;
+    }
+    if (event.healAmount && event.revealTarget) {
+      this._startMotion(event.revealTarget, "heal", 1);
+    }
+  };
+
+  /**
+   * その技をどう出すか（"attack" 踏み込む / "cast" 放つ / "buff" 自分にかける）。
+   *
+   * 技ごとに書かなくて済むよう、技の effect から決める。
+   *   殴る・斬る（data/motions.js の meleeEffects）… 踏み込む
+   *   自分・味方が対象                              … その場でかける
+   *   それ以外                                      … 溜めて放つ
+   * 技側で変えたいときは data/skills.js に motion: "cast" と1行足せば上書きできる。
+   */
+  BattleScene.prototype._skillMotionKind = function (skill) {
+    if (!skill) return "attack";
+    if (skill.motion) return skill.motion;
+
+    if (skill.target === "self" || skill.target === "ally") return "buff";
+
+    var melee = (this.game.data.motionDefaults || {}).meleeEffects || [];
+    return (melee.indexOf(skill.effect) >= 0) ? "attack" : "cast";
+  };
+
+  /**
+   * 技の演出を出す。
+   *
+   * 技を出した時点ではまだ相手に届いていないので、
+   * 当たった（外れた／効かなかった）ところで出す。
+   * 踏み込みが終わったあとに演出が来るので、順番が自然になる。
+   *
+   * 形は技の effect、色は技の属性から決まる。
+   * effect を書いていない技は、何も出ない。
+   */
+  BattleScene.prototype._playSkillEffect = function (event) {
+    // 技を出した時点で覚えておき、当たった出来事で使う
+    if (event.type === "useSkill") {
+      this._currentSkill = event.skill || null;
+      // 名前に注意：_currentActor は「いま行動を決めている味方」を返すメソッド。
+      // 同じ名前で値を入れるとメソッドを潰してしまう（実際に一度やって戦闘が壊れた）
+      this._currentSkillActor = event.actor || null;
+      return;
+    }
+
+    if (!this._currentSkill) return;
+    if (!isHitEvent(event.type) || !event.target) return;
+
+    var effectId = this._effectIdFor(this._currentSkill, this._currentSkillActor);
+    if (!effectId) return;
+
+    var pos = this._monsterCenter(event.target);
+    if (!pos) return;
+
+    this.skillEffects.play(effectId, this.game.clock, pos.x, pos.y,
+      this._skillEffectColor(this._currentSkill),
+      // 強化は下から上へ、弱体は上から下へ流す
+      this._effectDirection(this._currentSkill, event));
+  };
+
+  /**
+   * 演出の向き。強化なら 1（下から上）、弱体なら -1（上から下）。
+   * 強化・弱体でない技は向きを持たない（1 のまま）。
+   */
+  BattleScene.prototype._effectDirection = function (skill, event) {
+    if (!skill.modifier) return 1;
+    return event.raised ? 1 : -1;
+  };
+
+  /**
+   * どの形の演出を出すか。
+   *
+   * ふつうは技に書いてある effect。
+   * 通常攻撃だけは、出した本人の attackEffect を優先する
+   * （噛みつく相手と、硬い体でぶつかる相手で見た目を変えるため）。
+   */
+  BattleScene.prototype._effectIdFor = function (skill, actor) {
+    if (actor && skill.id === this._normalAttackId() && actor.getAttackEffectId) {
+      var own = actor.getAttackEffectId();
+      if (own) return own;
+    }
+    return skill.effect;
+  };
+
+  /**
+   * 演出の色を決める。
+   *
+   * ふつうの技は属性の色。
+   * 強化・弱体の技だけは「何が変わるか」で色を変える
+   * （守りなら青、攻撃なら赤…のほうが、属性の色より意味が伝わるため）。
+   */
+  BattleScene.prototype._skillEffectColor = function (skill) {
+    if (skill.modifier) {
+      var color = this._modifierColor(skill.modifier);
+      if (color) return color;
+    }
+    return this._elementColor(skill.element);
+  };
+
+  /** 変わるステータスの色（data/effects.js の statColors）。分からなければ null */
+  BattleScene.prototype._modifierColor = function (spec) {
+    var colors = (this.game.data.effects || {}).statColors || {};
+    var effects = (spec && spec.effects) || [];
+
+    for (var i = 0; i < effects.length; i++) {
+      var e = effects[i];
+      if (e.type === "statMultiplier" || e.type === "statBonus") {
+        if (colors[e.stat]) return colors[e.stat];
+      }
+    }
+    // ダメージ倍率を変えるだけの効果は、属性があればその色を使う
+    return null;
+  };
+
+  /** 技の属性の色。分からなければ null（既定の色になる） */
+  BattleScene.prototype._elementColor = function (elementId) {
+    var element = (this.game.data.elements || {})[elementId];
+    return (element && element.color) || null;
+  };
+
+  /**
+   * 「技が相手に届いた」出来事か。
+   * バフ／デバフ（modifier）もここに含める。掛かった瞬間に演出を出すため。
+   */
+  function isHitEvent(type) {
+    return type === "damage" || type === "miss"
+        || type === "immune" || type === "modifier";
+  }
+
+  /** その個体が持っている動きを再生する（持っていなければ何もしない） */
+  BattleScene.prototype._startMotion = function (monster, kind, facing) {
+    if (!monster.getActionMotionId) return;
+
+    var motionId = monster.getActionMotionId(kind);
+    if (!motionId) return;
+
+    this.actionMotions.play(monster, motionId, this.game.clock, facing);
   };
 
   /**
@@ -423,8 +735,29 @@
       }
     }
 
-    if (style.shake) this.screenEffects.shake(style.shake);
-    if (style.flash) this.screenEffects.flash(style.flash, style.flashAlpha);
+    // 画面の揺れと発光も「エフェクトの濃さ」に従う。
+    // 0 のときは何も起きないので、光の点滅が苦手でも遊べる
+    var scale = this._effectIntensity();
+    if (scale <= 0) return;
+
+    if (style.shake) this.screenEffects.shake(style.shake * scale);
+    if (style.flash) this.screenEffects.flash(style.flash, style.flashAlpha * scale);
+  };
+
+  /**
+   * 設定「エフェクトの濃さ」に対応する倍率。
+   * 対応表は data/ui.js の battle.animation.effectScale。
+   */
+  BattleScene.prototype._effectIntensity = function () {
+    var table = this.animation.effectScale;
+    var settings = this.game.settings;
+    if (!table || !settings) return 1;
+
+    var level = settings.get("effectLevel");
+    if (typeof level !== "number") return 1;
+
+    var value = table[Math.max(0, Math.min(table.length - 1, level))];
+    return (typeof value === "number") ? value : 1;
   };
 
   /** 演出を終えて、次の状態へ移る */
@@ -432,9 +765,10 @@
     this.viewAllies = null;
     this.viewEnemies = null;
 
-    // 見せ終わったので、表示HPを実際の値に揃えておく
+    // 見せ終わったので、表示HPと印を実際の状態に揃えておく
     this.animator.snap(this.allies);
     this.animator.snap(this.enemies);
+    this._syncModifierMarks();
 
     this.phase = "message";   // 決定キーで次のターンへ進む
   };
@@ -666,6 +1000,14 @@
         this.pending = { type: "scout" };
         this._beginTargetSelect("enemy");
         break;
+      case "swap":
+        this._buildSwapMenu();
+        if (!this.subMenu.hasEntries()) {
+          this._flashMessage(this.texts.noReserve);
+          return;
+        }
+        this.phase = "swap";
+        break;
       case "item":
         this._buildItemMenu();
         if (!this.subMenu.hasEntries()) {
@@ -699,8 +1041,40 @@
       return;
     }
 
+    // 自分にかける技と範囲全体の技は相手を選ばない。そのまま確定する
+    if (skill && (skill.target === "self" || skill.target === "allEnemies")) {
+      this._commitAction({ type: "skill", skillId: selected.value });
+      return;
+    }
+
     this.pending = { type: "skill", skillId: selected.value };
-    this._beginTargetSelect("enemy", "skill");
+    // 味方にかける技（キュアなど）は、狙う先が向かい側ではなくこちら側になる。
+    // 選ぶ仕組みは道具のときと同じものを使い回している
+    this._beginTargetSelect(skill && skill.target === "ally" ? "ally" : "enemy", "skill");
+  };
+
+  /**
+   * 交代する相手を選ぶ。
+   * 交代はその仲間のこのターンの行動になる（選んだ本人は動かない）。
+   */
+  BattleScene.prototype._updateSwap = function (input) {
+    this.subMenu.handleInput(input);
+
+    if (input.isPressed("cancel")) {
+      this.phase = "command";
+      return;
+    }
+    if (!input.isPressed("confirm") && !this.subMenu.clickedEntry(input)) return;
+
+    var selected = this.subMenu.getSelected();
+    // 選べる相手がいなければ、ここで詰まらせずにコマンドへ戻す
+    if (!selected) {
+      this._flashMessage(this.texts.noReserve);
+      this.phase = "command";
+      return;
+    }
+
+    this._commitAction({ type: "swap", incoming: selected.value });
   };
 
   BattleScene.prototype._updateItem = function (input) {
@@ -814,7 +1188,12 @@
     this.pending = null;
     this.commandIndex++;
 
-    // スカウトは他の仲間の指示を待たず、すぐその1体だけで動く
+    // スカウトを選んだら、まだ指示していない仲間を待たずにターンを締め切る。
+    // そのため1ターンに誘えるのは1回だけになる。
+    //
+    // ここで決めた他の仲間の行動がどうなるかは BattleSystem 側で決まる。
+    // 実際に効くのは防御だけで、その理由と、そこから生まれる小技については
+    // BattleSystem._buildTurnOrder のコメントを参照。
     if (action.type === "scout") {
       this._resolveTurn();
       return;
@@ -897,6 +1276,37 @@
     var action = step.action;
     if (action.type === "item") this._resolveItemAction(step, events);
     else if (action.type === "scout") this._resolveScoutAction(step, events);
+    else if (action.type === "swap") this._resolveSwapAction(step, events);
+  };
+
+  /**
+   * 交代する。並びの中で位置を入れ替えるだけ。
+   *
+   * 盤面に出るのはパーティの先頭から battleFieldSize 体なので、
+   * 出ている者と控えの者を入れ替えれば、そのまま前後が入れ替わる。
+   * 交代した本人はこのターン動かない（交代が行動そのもの）。
+   */
+  BattleScene.prototype._resolveSwapAction = function (step, events) {
+    var party = this.allySource;
+    var incoming = step.action.incoming;
+    var outgoing = step.actor;
+
+    if (!party || typeof party.swap !== "function" || !incoming || !outgoing) {
+      events.push({ type: "custom", text: this.texts.swapFailed });
+      return;
+    }
+
+    var members = this._partyMembers();
+    var from = members.indexOf(outgoing);
+    var to = members.indexOf(incoming);
+
+    if (from < 0 || to < 0 || !party.swap(from, to)) {
+      events.push({ type: "custom", text: this.texts.swapFailed });
+      return;
+    }
+
+    events.push({ type: "custom", text: fill(this.texts.swapped,
+      { out: outgoing.getName(), "in": incoming.getName() }) });
   };
 
   BattleScene.prototype._resolveItemAction = function (step, events) {
@@ -922,6 +1332,27 @@
     }
   };
 
+  /**
+   * 誘いに応じた相手を、仲間として加える形にして返す。
+   *
+   * ふつうは戦っていた個体をそのまま連れて行く。
+   * scoutLevel が指定されていて、いま戦っているレベルより低い場合だけ、
+   * そのレベルの個体として作り直す（ボスをそのまま仲間にすると強すぎるため）。
+   * 性格と個体値は戦った個体のものを引き継ぐので、「その一体を捕まえた」感じは残る。
+   */
+  BattleScene.prototype._recruitFrom = function (target) {
+    var level = this.scoutLevel;
+    if (level === undefined || level === null) return target;
+    if (!(level < target.level)) return target;
+
+    var recruit = new NS.MonsterInstance(target.speciesId, level, this.game.data, {
+      nature: target.natureId,
+      ivs: target.ivs
+    });
+    // 種族が見つからないなど、作れなかったときは元の個体をそのまま渡す
+    return recruit.getSpecies() ? recruit : target;
+  };
+
   BattleScene.prototype._resolveScoutAction = function (step, events) {
     var action = step.action;
     var texts = (this.game.data.messages || {}).scout || {};
@@ -944,13 +1375,17 @@
 
     events.push({ type: "custom", text: fill(texts.success, { name: target.getName() }) });
 
+    // 仲間になるのは、戦っていた個体そのものとは限らない（ボスはレベルを下げる）。
+    // そのことは画面には出さない。仲間の一覧を見ればレベルは分かる
+    var recruit = this._recruitFrom(target);
+
     if (this.scoutSystem.isFull(party)) {
       // 加える先は選んでもらうので、ここではまだパーティに入れない
-      this.pendingScout = target;
+      this.pendingScout = recruit;
       events.push({ type: "custom", text: texts.partyFull });
     } else {
-      this.scoutSystem.join(party, target);
-      this._recordJoined(target);
+      this.scoutSystem.join(party, recruit);
+      this._recordJoined(recruit);
     }
 
     // 仲間になった相手は敵ではなくなり、その場で戦闘が終わる
@@ -989,12 +1424,56 @@
 
   // --- 描画 ---
 
+  /**
+   * いま戦っている場所の背景設定を探す。
+   * 挑戦中のダンジョン → そのテーマ → battle の順にたどる。
+   * どこかで途切れたら null（共通の色で描く）。
+   */
+  BattleScene.prototype._findScenery = function () {
+    var run = this.game.run;
+    var dungeon = run && run.dungeon;
+    if (!dungeon || !dungeon.theme) return null;
+
+    var theme = (this.game.data.dungeonThemes || {})[dungeon.theme];
+    return (theme && theme.battle) || null;
+  };
+
+  /**
+   * 戦っている場所の背景を描く。
+   * 場所ごとの設定が無ければ、今までどおり1色で塗りつぶす。
+   */
+  BattleScene.prototype._renderScenery = function (ctx, w, h, L) {
+    var scenery = this.scenery;
+    if (!scenery) {
+      this.renderer.clear(L.background || "#000000", w, h);
+      return;
+    }
+
+    var gradient = ctx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, scenery.gradientTop || L.background || "#000000");
+    gradient.addColorStop(1, scenery.gradientBottom || L.background || "#000000");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, w, h);
+
+    // 立っている地面。上端に線を引いて、奥と手前を分ける
+    if (scenery.groundY !== undefined && scenery.groundColor) {
+      ctx.fillStyle = scenery.groundColor;
+      ctx.fillRect(0, scenery.groundY, w, h - scenery.groundY);
+      if (scenery.edgeColor) {
+        ctx.fillStyle = scenery.edgeColor;
+        ctx.fillRect(0, scenery.groundY, w, 1);
+      }
+    }
+
+    if (this.sceneryParticles) this.sceneryParticles.render(ctx);
+  };
+
   BattleScene.prototype.render = function (ctx) {
     var w = this.game.canvas.width;
     var h = this.game.canvas.height;
     var L = this.layout;
 
-    this.renderer.clear(L.background || "#000000", w, h);
+    this._renderScenery(ctx, w, h, L);
 
     // 揺れは盤面だけに掛ける（メッセージ欄まで揺れると読みにくいため）
     this.screenEffects.begin(ctx);
@@ -1002,8 +1481,13 @@
     this._renderSide(this._viewAllies(), L.allyRow, w, "ally");
     this.screenEffects.end(ctx);
 
+    // 技の演出は、モンスターより手前・メッセージ欄より奥に描く
+    this.skillEffects.render(ctx, this.game.clock);
+
     if (this.phase === "command") this._renderCommand();
-    else if (this.phase === "skill" || this.phase === "item") this._renderSubMenu();
+    else if (this.phase === "skill" || this.phase === "item" || this.phase === "swap") {
+      this._renderSubMenu();
+    }
     else if (this.phase === "scoutChoice") this._renderScoutChoice();
     else if (this.phase === "scoutSwap") this._renderScoutSwap();
     else {
@@ -1050,6 +1534,35 @@
   };
 
   /**
+   * 指定モンスターの絵の中央。技の演出を出す場所に使う。
+   * 数字は頭の上に出すが、演出は体の真ん中から出したいので分けてある。
+   */
+  BattleScene.prototype._monsterCenter = function (monster) {
+    if (!monster) return null;
+    var w = this.game.canvas.width;
+
+    var enemies = this._viewEnemies();
+    var index = enemies.indexOf(monster);
+    if (index >= 0) return this._rowCenter(this.layout.enemyRow, enemies.length, index, w);
+
+    var allies = this._viewAllies();
+    index = allies.indexOf(monster);
+    if (index >= 0) return this._rowCenter(this.layout.allyRow, allies.length, index, w);
+
+    return null;
+  };
+
+  BattleScene.prototype._rowCenter = function (row, count, index, canvasWidth) {
+    if (!row || count <= 0) return null;
+
+    var startX = (canvasWidth - row.slotGap * count) / 2;
+    return {
+      x: startX + row.slotGap * index + row.slotGap / 2,
+      y: row.y + (row.spriteSize || 96) / 2
+    };
+  };
+
+  /**
    * 並びの中の1体分の位置を求める。
    * 数字はスプライトに重ならないよう、頭のすぐ上から出す
    * （離れすぎると誰への表示か分からなくなるため、少しだけ上）。
@@ -1086,14 +1599,19 @@
 
   BattleScene.prototype._renderMember = function (monster, centerX, row, side, index) {
     var t = this.theme;
-    var size = row.spriteSize;
+
+    // 種族ごとの大きさ（data/monsters.js の sizeScale）。竜のような相手は大きく出る
+    var base = row.spriteSize;
+    var size = Math.round(base * (monster.getSizeScale ? monster.getSizeScale() : 1));
 
     // HPバーは実際の値ではなく「見た目のHP」で描くので、少しずつ減っていく
     var shownHp = Math.max(0, Math.round(this.animator.getHp(monster)));
 
-    // 見た目のHPが0になった相手は姿を消す
-    if (shownHp > 0) {
-      this.spriteRenderer.draw(monster.getSpriteId(), centerX - size / 2, row.y, size, size);
+    var action = this.actionMotions.get(monster, this.game.clock);
+    if (this._shouldShowSprite(monster, shownHp, action)) {
+      // 下端をそろえて上へ伸ばす。こうしないと大きい相手が状態表示に食い込む
+      var top = row.y + (base - size);
+      this._renderMemberSprite(monster, centerX - size / 2, top, size, action);
     }
 
     // 状態表示（名前・Lv・HP）
@@ -1103,6 +1621,9 @@
 
     var origin = this.panel.innerOrigin(rect);
     this.panel.drawText(monster.getName(), origin.x, origin.y + 10, { font: t.smallFont });
+
+    // 掛かっている強化・弱体を名前の横に出す
+    this._renderModifierMarks(monster, origin, origin.y + 10);
 
     // 敵のレベルは伏せる（味方だけ表示する）
     if (side === "ally") {
@@ -1129,6 +1650,129 @@
     }
 
     this._renderMemberMarkers(monster, rect, side, index);
+  };
+
+  /**
+   * 印として見せているバフ／デバフ。
+   *
+   * ▼ なぜ monster.modifiers をそのまま描かないか
+   * 1ターンぶんの計算は takeTurn で一度に終わり、そのあと出来事を1つずつ見せていく。
+   * つまり効果は「見せる前」からもう掛かっている。
+   * そのまま描くと、まだ順番が回っていない相手の印が先に出てしまう。
+   * HPバーを animator で遅らせているのと同じ理由で、印もここで別に持つ。
+   */
+  BattleScene.prototype._shownModifiersFor = function (monster) {
+    var result = [];
+    var shown = this.shownModifiers || [];
+
+    for (var i = 0; i < shown.length; i++) {
+      if (shown[i].monster === monster) result.push(shown[i]);
+    }
+    return result;
+  };
+
+  /** 「掛かった」出来事を見せた瞬間に、印を出す */
+  BattleScene.prototype._revealModifier = function (event) {
+    if (!event.target) return;
+
+    var mod = event.target.getModifier ? event.target.getModifier(event.skillId) : null;
+    // 掛け直しのときは、すでに出ている印をそのまま使う
+    var shown = this._shownModifiersFor(event.target);
+    for (var i = 0; i < shown.length; i++) {
+      if (shown[i].name === event.skillName) return;
+    }
+
+    this.shownModifiers.push({
+      monster: event.target,
+      name: event.skillName,
+      effects: (mod && mod.effects) || event.effects || []
+    });
+  };
+
+  /** 効果が切れた出来事を見せた瞬間に、印を消す */
+  BattleScene.prototype._hideModifier = function (event) {
+    var kept = [];
+    for (var i = 0; i < this.shownModifiers.length; i++) {
+      var entry = this.shownModifiers[i];
+      if (entry.monster === event.target && entry.name === event.skillName) continue;
+      kept.push(entry);
+    }
+    this.shownModifiers = kept;
+  };
+
+  /**
+   * 見せ終わったので、印を実際の状態に合わせ直す。
+   * 途中で戦闘が終わって見せきれなかった出来事があっても、ここでずれが直る。
+   */
+  BattleScene.prototype._syncModifierMarks = function () {
+    var everyone = (this.allies || []).concat(this.enemies || []);
+    var result = [];
+
+    for (var i = 0; i < everyone.length; i++) {
+      var mods = everyone[i].modifiers || [];
+      for (var j = 0; j < mods.length; j++) {
+        result.push({ monster: everyone[i], name: mods[j].name, effects: mods[j].effects });
+      }
+    }
+    this.shownModifiers = result;
+  };
+
+  /**
+   * 掛かっているバフ／デバフを、名前のうしろに短い印で出す。
+   * 上がるものは緑、下がるものは赤。
+   *
+   * 枠が狭いので「何が」「どちらへ」だけを出し、
+   * 倍率までは出さない（技の説明を見れば分かるため）。
+   */
+  BattleScene.prototype._renderModifierMarks = function (monster, origin, baseY) {
+    var mods = this._shownModifiersFor(monster);
+    if (mods.length === 0) return;
+
+    var t = this.theme;
+    var ctx = this.panel.ctx;
+    var font = t.smallFont || "12px monospace";
+
+    ctx.font = font;
+    var x = origin.x + ctx.measureText(monster.getName()).width + 8;
+
+    for (var i = 0; i < mods.length; i++) {
+      var mark = this._modifierMark(mods[i]);
+      if (!mark.text) continue;
+
+      this.panel.drawText(mark.text, x, baseY, { font: font, color: mark.color });
+      ctx.font = font;   // drawText がフォントを変えるので測る前に戻す
+      x += ctx.measureText(mark.text).width + 4;
+    }
+  };
+
+  /**
+   * 効果1つを「防↑」のような短い印にする。
+   * 文字は data/messages.js の battleUi、色は theme から取る。
+   */
+  BattleScene.prototype._modifierMark = function (mod) {
+    var t = this.theme;
+    var marks = this.texts.statMarks || {};
+    var effects = (mod && mod.effects) || [];
+
+    for (var i = 0; i < effects.length; i++) {
+      var e = effects[i];
+      var up = null;
+      var label = null;
+
+      if (e.type === "statMultiplier") { up = e.value > 1; label = marks[e.stat]; }
+      else if (e.type === "statBonus")  { up = e.value > 0; label = marks[e.stat]; }
+      // 与ダメージ・被ダメージは、上がり下がりの向きが逆になることに注意
+      else if (e.type === "damageDealt") { up = e.value > 1; label = this.texts.markOther; }
+      else if (e.type === "damageTaken") { up = e.value < 1; label = this.texts.markOther; }
+
+      if (label === null || label === undefined) continue;
+
+      return {
+        text: label + (up ? (this.texts.markUp || "↑") : (this.texts.markDown || "↓")),
+        color: up ? (t.hpBarHigh || "#5fd18c") : (t.hpBarLow || "#e8542a")
+      };
+    }
+    return { text: "", color: t.subTextColor };
   };
 
   /** 行動を決めている味方や、選択中の対象に印をつける */
@@ -1167,7 +1811,7 @@
     this.panel.drawText(this.texts.hintCommand || "", origin.x, rect.y + rect.h - 14,
       { font: this.theme.smallFont, color: this.theme.hintColor });
 
-    this.commandMenu.render();
+    this.commandMenu.render(this.game.clock);
   };
 
   BattleScene.prototype._renderSubMenu = function () {
@@ -1175,14 +1819,26 @@
     this.panel.drawBox(rect);
 
     var origin = this.panel.innerOrigin(rect);
-    var label = (this.phase === "skill") ? this.texts.selectSkill : this.texts.selectItem;
-    this.panel.drawText(label || "", origin.x, origin.y + 20);
+    this.panel.drawText(this._subMenuLabel() || "", origin.x, origin.y + 20);
 
     // 選んでいるものの中身を左側に出す
     if (this.phase === "skill") this._renderSkillInfo(origin, rect);
-    else this._renderItemInfo(origin, rect);
+    else if (this.phase === "item") this._renderItemInfo(origin, rect);
+    else this._renderSwapHint(origin, rect);
 
-    this.subMenu.render();
+    this.subMenu.render(this.game.clock);
+  };
+
+  BattleScene.prototype._subMenuLabel = function () {
+    if (this.phase === "skill") return this.texts.selectSkill;
+    if (this.phase === "item") return this.texts.selectItem;
+    return this.texts.selectSwap;
+  };
+
+  /** 交代を選んでいるときの案内（技や道具のような詳細は無い） */
+  BattleScene.prototype._renderSwapHint = function (origin, rect) {
+    this.panel.drawText(this.texts.hintSwap || "", origin.x, rect.y + rect.h - 14,
+      { font: this.theme.smallFont, color: this.theme.hintColor });
   };
 
   /**
@@ -1275,7 +1931,7 @@
     this.panel.drawText(texts.choiceHint || "", origin.x, rect.y + rect.h - 14,
       { font: this.theme.smallFont, color: this.theme.hintColor });
 
-    this.commandMenu.render();
+    this.commandMenu.render(this.game.clock);
   };
 
   /** どの仲間と入れ替えるかを選ぶ画面 */
@@ -1289,7 +1945,7 @@
     this.panel.drawText(texts.selectHint || "", origin.x, rect.y + rect.h - 14,
       { font: this.theme.smallFont, color: this.theme.hintColor });
 
-    this.subMenu.render();
+    this.subMenu.render(this.game.clock);
   };
 
   /** 文字数で折り返す（等幅フォント前提の簡易処理） */

@@ -15,22 +15,7 @@
   var NOTICE_DURATION = 1600;      // 通知を表示しておく時間（ms）
   var RETURN_NOTICE_DURATION = 3600; // 帰還の知らせは読ませたいので長めに出す
 
-  /**
-   * メニューの並び。
-   *   key   : data/messages.js の home から表示名を引くためのキー
-   *   value : 選ばれたときの識別子
-   *   ready : 実装済みか（false なら「じゅんびちゅう」を表示するだけ）
-   */
-  var MENU_ITEMS = [
-    { key: "dungeon",  value: "dungeon",  ready: true },
-    { key: "party",    value: "party",    ready: true },
-    { key: "shop",     value: "shop",     ready: true },
-    { key: "craft",    value: "craft",    ready: true },
-    { key: "items",    value: "items",    ready: true },
-    { key: "dex",      value: "dex",      ready: true },
-    { key: "save",     value: "save",     ready: true },
-    { key: "settings", value: "settings", ready: true }
-  ];
+  // メニューの並び・絵・解放条件は data/home.js が持つ
 
   /**
    * @param {MyGame.Game} game
@@ -49,7 +34,8 @@
     this.hpBar = new NS.HpBar(game.ctx, this.theme);
     this.sprites = new NS.SpriteRenderer(game.ctx, game.assets);
     this.renderer = new NS.Renderer(game.ctx);
-    this.menu = new NS.CommandMenu(this.panel, this.layout.menu);
+    // 描き手を渡すと、項目の左に絵がつく（data/ui.js の menu.iconSize）
+    this.menu = new NS.CommandMenu(this.panel, this.layout.menu, this.sprites);
 
     this.particles = new NS.ParticleField(
       this.layout.particles, game.canvas.width, game.canvas.height
@@ -58,8 +44,10 @@
     this.saveManager = new NS.SaveManager(game.data);
     this.random = new NS.Random();
 
-    this._notice = null;
-    this._noticeTimer = 0;
+    this.notice = new NS.Notice(this.theme.notice);
+
+    // 画面に出している所持金。実際の額へ向かって少しずつ動かす
+    this._shownGold = null;
 
     this._ensureParty();
     this._buildMenu();
@@ -70,21 +58,47 @@
     this.game.ensureProgress();
   };
 
+  /**
+   * メニューを組み立てる。
+   * まだ使えない項目も並べるが、灰色にして「今は選べない」ことを示す
+   * （隠してしまうと、何が増えるのか分からなくなるため）。
+   */
   HomeScene.prototype._buildMenu = function () {
+    var entries = (this.game.data.home || {}).menu || [];
     var items = [];
-    for (var i = 0; i < MENU_ITEMS.length; i++) {
-      var entry = MENU_ITEMS[i];
+    var keep = this.menu.index;   // 組み直しても、選んでいた場所に戻す
+
+    for (var i = 0; i < entries.length; i++) {
+      var entry = entries[i];
+      var locked = !this._isEntryUnlocked(entry);
+
       items.push({
         label: this.texts[entry.key] || entry.key,
         value: entry.value,
-        ready: entry.ready
+        ready: entry.ready !== false,
+        locked: locked,
+        unlockedBy: entry.unlockedBy,
+        icon: entry.icon,
+        color: locked ? this.theme.hintColor : null
       });
     }
     this.menu.setItems(items);
+    if (keep > 0 && keep < items.length) this.menu.index = keep;
+  };
+
+  /** その項目が使えるか。条件の判定はダンジョンや店と同じ仕組みを使う */
+  HomeScene.prototype._isEntryUnlocked = function (entry) {
+    if (!entry.unlockedBy) return true;
+    if (!NS.DungeonCatalog) return true;
+
+    return NS.DungeonCatalog.isConditionMet(
+      entry.unlockedBy, this.game.clearedDungeons, this.game.data);
   };
 
   HomeScene.prototype.enter = function () {
     this._ensureParty();
+    // 戻ってくるたびに組み直す（クリアして使えるようになった項目を反映するため）
+    this._buildMenu();
 
     // 帰還時の知らせ（失ったものなど）は、開いたときに一度だけ出す
     if (this._pendingNotice) {
@@ -97,11 +111,9 @@
 
   HomeScene.prototype.update = function (dt) {
     this.particles.update(dt);
+    this._updateGold();
 
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
-    }
+    this.notice.update(dt);
 
     var result = this.menu.handleInput(this.game.input);
     if (!result) return;
@@ -115,14 +127,37 @@
 
   HomeScene.prototype._select = function (value) {
     var selected = this.menu.getSelected();
+    if (!selected) return;
 
     // 未実装の項目は知らせるだけで、画面は変えない
-    if (selected && selected.ready === false) {
+    if (selected.ready === false) {
       var template = this.texts.comingSoon || "{name}";
       this._showNotice(template.replace("{name}", selected.label));
       return;
     }
+
+    // まだ使えない項目は、何をすれば使えるかを知らせる
+    if (selected.locked) {
+      this._showNotice(this._lockedMessage(selected));
+      return;
+    }
+
     this._openFeature(value);
+  };
+
+  /** 「○○ は △△ をクリアすると使える」。条件の名前が分からなければ短い文 */
+  HomeScene.prototype._lockedMessage = function (item) {
+    var required = NS.DungeonCatalog
+      ? NS.DungeonCatalog.conditionName(
+          this.game.data, item.unlockedBy, this.game.clearedDungeons)
+      : null;
+
+    if (!required) {
+      return (this.texts.lockedShort || "{name}").replace("{name}", item.label);
+    }
+    return (this.texts.locked || "{name}")
+      .replace("{name}", item.label)
+      .replace("{required}", required);
   };
 
   /** 実装済みの項目を開く */
@@ -140,6 +175,9 @@
         break;
       case "craft":
         this.game.scenes.change(new NS.CraftScene(this.game, this));
+        break;
+      case "blessing":
+        this.game.scenes.change(new NS.BlessingSelectScene(this.game, this));
         break;
       case "items":
         this.game.scenes.change(new NS.ItemScene(this.game, this));
@@ -169,6 +207,8 @@
       gold: this.game.gold,
       discovery: this.game.discovery,
       clearedDungeons: this.game.clearedDungeons,
+      boughtBlessings: this.game.boughtBlessings,
+      offBlessings: this.game.offBlessings,
       dungeon: null
     });
 
@@ -176,9 +216,31 @@
     this._showNotice(saveTexts[result.reason] || result.reason);
   };
 
+  /**
+   * 表示中の所持金を、実際の額へ近づける。
+   *
+   * 買い物から戻ったときに数字がすっと動くので、増えたか減ったかが分かる。
+   * 差が1未満になったら、端数を残さないよう実際の額に合わせる。
+   */
+  HomeScene.prototype._updateGold = function () {
+    var actual = this.game.gold || 0;
+
+    // 初めて開いたときは、0から数え上げずにその額から始める
+    if (this._shownGold === null) {
+      this._shownGold = actual;
+      return;
+    }
+
+    var diff = actual - this._shownGold;
+    if (Math.abs(diff) < 1) {
+      this._shownGold = actual;
+      return;
+    }
+    this._shownGold += diff * ((this.layout.gold || {}).countSpeed || 0.14);
+  };
+
   HomeScene.prototype._showNotice = function (text, duration) {
-    this._notice = text;
-    this._noticeTimer = duration || NOTICE_DURATION;
+    this.notice.show(text, duration || NOTICE_DURATION);
   };
 
   // --- 描画 ---
@@ -188,13 +250,88 @@
     var h = this.game.canvas.height;
 
     this._renderBackground(ctx, w, h);
+    this._renderScenery(ctx, w, h);
     this.particles.render(ctx);
     this._renderHeading(ctx);
     this._renderGold();
-    this.menu.render();
+    this.menu.render(this.game.clock);
     this._renderPartyStatus();
     this._renderNotice(ctx);
     this._renderHint(ctx);
+  };
+
+  /**
+   * 背景の景色。「深き穴のほとり」という場所を絵で見せる。
+   *
+   * パネルより先に描くので、上下の余白にだけ見える。
+   * 地面 → 穴 → たき火 の順。穴は地面より手前に描かないと埋まってしまう。
+   */
+  HomeScene.prototype._renderScenery = function (ctx, w, h) {
+    var S = this.layout.scenery;
+    if (!S) return;
+
+    this._renderGround(ctx, w, h, S.ground);
+    this._renderHole(ctx, S.hole);
+    this._renderCampfire(ctx, S.campfire);
+  };
+
+  /** 画面の下にある深い穴。ふちだけがうっすら光る */
+  HomeScene.prototype._renderHole = function (ctx, hole) {
+    if (!hole) return;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.ellipse(hole.cx, hole.cy, hole.rx, hole.ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = hole.color || "#000000";
+    ctx.fill();
+
+    if (hole.rimColor) {
+      ctx.strokeStyle = hole.rimColor;
+      ctx.lineWidth = hole.rimWidth || 2;
+      ctx.stroke();
+    }
+    ctx.restore();
+  };
+
+  /** 穴のふちの地面。上端に細い線を引いて手前と奥を分ける */
+  HomeScene.prototype._renderGround = function (ctx, w, h, ground) {
+    if (!ground) return;
+
+    ctx.save();
+    ctx.fillStyle = ground.color || "#000000";
+    ctx.fillRect(0, ground.y, w, h - ground.y);
+
+    if (ground.edgeColor) {
+      ctx.fillStyle = ground.edgeColor;
+      ctx.fillRect(0, ground.y, w, 1);
+    }
+    ctx.restore();
+  };
+
+  /** たき火。まわりの明かりをゆっくり強弱させ、炎そのものは blaze で揺らす */
+  HomeScene.prototype._renderCampfire = function (ctx, fire) {
+    if (!fire) return;
+
+    var size = fire.size || 32;
+    var centerX = fire.x + size / 2;
+    var centerY = fire.y + size / 2;
+
+    if (fire.glowRadius) {
+      var radius = Math.max(1,
+        NS.Motion.value(fire.glowPulse, this.game.clock, 0, fire.glowRadius));
+      var glow = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, radius);
+      glow.addColorStop(0, fire.glowColor || "#ffffff");
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+
+      ctx.save();
+      ctx.globalAlpha = (fire.glowAlpha === undefined) ? 0.15 : fire.glowAlpha;
+      ctx.fillStyle = glow;
+      ctx.fillRect(centerX - radius, centerY - radius, radius * 2, radius * 2);
+      ctx.restore();
+    }
+
+    this.sprites.drawMotion("campfire", fire.x, fire.y, size, size,
+      NS.Motion.of(this.game.data, fire.motion, this.game.clock, 0));
   };
 
   HomeScene.prototype._renderBackground = function (ctx, w, h) {
@@ -223,7 +360,9 @@
     if (!pos) return;
 
     var template = this.texts.gold || "{amount}G";
-    this.panel.drawText(template.replace("{amount}", this.game.gold || 0),
+    var shown = (this._shownGold === null) ? (this.game.gold || 0) : this._shownGold;
+
+    this.panel.drawText(template.replace("{amount}", Math.round(shown)),
       pos.x, pos.y,
       { align: "right", font: pos.font || this.theme.font, color: pos.color || this.theme.cursorColor });
   };
@@ -255,9 +394,16 @@
   HomeScene.prototype._renderPartyRow = function (monster, x, y, S) {
     var t = this.theme;
 
-    this.sprites.draw(monster.getSpriteId(), x, y, S.spriteSize, S.spriteSize);
+    var sprite = monster.getSpriteId();
+    // 種族ごとの大きさ（sizeScale）。下端をそろえて上へ伸ばす
+    var base = S.spriteSize;
+    var size = Math.round(base * (monster.getSizeScale ? monster.getSizeScale() : 1));
+    this.sprites.drawMotion(sprite, x - (size - base) / 2, y + (base - size), size, size,
+      NS.Motion.forSprite(this.game.data, sprite, monster.getMotionId(),
+        this.game.clock, monster.getMotionPhase()));
 
-    var textX = x + S.spriteSize + 14;
+    // 文字の開始位置は元の大きさで決める（大きい相手でも行がずれないように）
+    var textX = x + base + 14;
     this.panel.drawText(monster.getName() + "  Lv" + monster.level, textX, y + 16);
 
     this.hpBar.draw(textX, y + 24, S.hpBarWidth, 8, monster.currentHp, monster.getMaxHp());
@@ -269,14 +415,15 @@
   };
 
   HomeScene.prototype._renderNotice = function (ctx) {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
     var pos = this.layout.notice || { x: 400, y: 470 };
 
     ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
     ctx.font = "14px monospace";
     ctx.fillStyle = this.theme.cursorColor || "#ffd75e";
     ctx.textAlign = "center";
-    ctx.fillText(this._notice, pos.x, pos.y);
+    ctx.fillText(this.notice.getText(), pos.x, pos.y);
     ctx.restore();
   };
 

@@ -20,9 +20,10 @@
   NS.rawData.categories = {
     item: {
       heal:      { id: "heal",      name: "回復", order: 1, color: "#5fd18c" },
-      equipment: { id: "equipment", name: "装備", order: 2, color: "#7fd9e8" },
-      material:  { id: "material",  name: "素材", order: 3, color: "#c8a35e" },
-      key:       { id: "key",       name: "重要", order: 4, color: "#e8b4ff" }
+      tool:      { id: "tool",      name: "道具", order: 2, color: "#7fd9a8" },
+      equipment: { id: "equipment", name: "装備", order: 3, color: "#7fd9e8" },
+      material:  { id: "material",  name: "素材", order: 4, color: "#c8a35e" },
+      key:       { id: "key",       name: "重要", order: 5, color: "#e8b4ff" }
     },
 
     monster: {

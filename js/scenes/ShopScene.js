@@ -37,71 +37,164 @@
 
     this.panel = new NS.Panel(game.ctx, this.theme);
     this.renderer = new NS.Renderer(game.ctx);
+    this.sprites = new NS.SpriteRenderer(game.ctx, game.assets);
     this.list = new NS.ScrollList(this.panel, this.layout.list);
     this.shop = new NS.ShopSystem(game.data);
 
     this.confirmMenu = new NS.CommandMenu(this.panel, this.layout.confirmMenu);
     this.backButton = new NS.BackButton(this.panel, game.data);
 
+    this.shops = this.shop.getShops(game.clearedDungeons);
+    this.shopIndex = 0;
     this.tabIndex = 0;
     this.phase = "list";
     this.order = null;       // 買おうとしている内容 { itemId, price, count, max }
-    this._notice = null;
-    this._noticeTimer = 0;
+    this.notice = new NS.Notice(this.theme.notice);
 
     this._rebuildList();
   }
 
   ShopScene.prototype.enter = function () {
+    // クリア状況が変わっていると開く店が増えるので、開くたびに数え直す
+    this.shops = this.shop.getShops(this.game.clearedDungeons);
+    if (this.shopIndex >= this.shops.length) this.shopIndex = 0;
+
     this.tabIndex = 0;
     this.phase = "list";
     this.order = null;
-    this._notice = null;
+    this.notice.clear();
     this._rebuildList();
   };
 
   ShopScene.prototype.getTab = function () { return TABS[this.tabIndex]; };
 
+  /** いま見ている店（1軒も開いていなければ null） */
+  ShopScene.prototype.getShop = function () {
+    return this.shops[this.shopIndex] || null;
+  };
+
   // --- 一覧の組み立て ---
 
+  /** 加護を売る店を見ているか（data/shop.js の type: "blessing"） */
+  ShopScene.prototype._isBlessingShop = function () {
+    var shop = this.getShop();
+    return !!(shop && shop.type === "blessing");
+  };
+
   ShopScene.prototype._rebuildList = function () {
+    // 加護は売れないので、この店では常に「買う」一覧を出す
+    if (this._isBlessingShop()) {
+      this.list.setRows(this._buildBlessingRows());
+      return;
+    }
     this.list.setRows(this.getTab() === "buy" ? this._buildBuyRows() : this._buildSellRows());
+  };
+
+  /**
+   * 謎の商人に並ぶ加護。
+   * 買ったものは値段のかわりに「持っている」と出し、選べないようにする。
+   */
+  ShopScene.prototype._buildBlessingRows = function () {
+    var blessings = this.game.data.blessings || {};
+    var t = this.theme;
+    var rows = [];
+
+    for (var id in blessings) {
+      if (!Object.prototype.hasOwnProperty.call(blessings, id)) continue;
+
+      var blessing = blessings[id];
+      if (!blessing.locked) continue;   // 最初から使えるものは売らない
+
+      var owned = this.game.hasBoughtBlessing(id);
+      var affordable = this.game.canAfford(blessing.price || 0);
+
+      rows.push({
+        type: "entry",
+        label: blessing.name,
+        right: owned ? (this.texts.owned || "所持") : (blessing.price + "G"),
+        color: owned ? t.hintColor : (affordable ? t.textColor : t.hintColor),
+        value: owned ? null : { blessingId: id, price: blessing.price || 0 }
+      });
+    }
+
+    if (rows.length === 0) {
+      rows.push({ type: "header", label: this.texts.noBlessings || "売り物がない", color: t.hintColor });
+    }
+    return rows;
   };
 
   /** 店に並んでいる品物。買えないものは薄く表示する */
   ShopScene.prototype._buildBuyRows = function () {
-    var stock = this.shop.getStock(this.game.clearedDungeons);
+    var stock = this.shop.getStock(this.game.clearedDungeons, this.getShop());
     var t = this.theme;
     var rows = [];
+    var lastCategory = null;
 
     for (var i = 0; i < stock.length; i++) {
+      var item = stock[i].item;
+
+      // 分類が変わったら見出しを挟む（持ち物の画面と同じ見せ方にそろえる）
+      var category = this.shop.getCategory(item);
+      if (category !== lastCategory) {
+        rows.push(this._categoryHeader(category));
+        lastCategory = category;
+      }
+
       var affordable = this.game.canAfford(stock[i].price);
       rows.push({
         type: "entry",
-        label: stock[i].item.name,
+        label: item.name,
         right: stock[i].price + "G",
         color: affordable ? t.textColor : t.hintColor,
-        value: { itemId: stock[i].item.id, price: stock[i].price }
+        value: { itemId: item.id, price: stock[i].price }
       });
     }
     return rows;
   };
 
-  /** 持ち物のうち、売れるもの */
+  /** 分類の見出し。持ち物・図鑑と同じ形にそろえる */
+  ShopScene.prototype._categoryHeader = function (category) {
+    return {
+      type: "header",
+      label: "- " + ((category && category.name) || "その他") + " -",
+      color: (category && category.color) || this.theme.subTextColor
+    };
+  };
+
+  /**
+   * 持ち物のうち、売れるもの。
+   * 買う側と同じく分類ごとに並べる（持ち物の画面と行き来しても迷わないように）。
+   */
   ShopScene.prototype._buildSellRows = function () {
-    var slots = this.game.inventory.getSlots();
+    var inventory = this.game.inventory;
     var rows = [];
+    if (!inventory) return rows;
 
-    for (var i = 0; i < slots.length; i++) {
-      var item = this.game.data.getItem(slots[i].itemId);
-      if (!item || !this.shop.canSell(item)) continue;
+    var groups = inventory.groupByCategory();
 
-      rows.push({
-        type: "entry",
-        label: item.name + " x" + slots[i].count,
-        right: this.shop.getSellPrice(item) + "G",
-        value: { itemId: item.id, price: this.shop.getSellPrice(item) }
-      });
+    for (var g = 0; g < groups.length; g++) {
+      var group = groups[g];
+      var entries = [];
+
+      for (var s = 0; s < group.slots.length; s++) {
+        var slot = group.slots[s];
+        var item = this.game.data.getItem(slot.itemId);
+        if (!item || !this.shop.canSell(item)) continue;
+
+        var price = this.shop.getSellPrice(item);
+        entries.push({
+          type: "entry",
+          label: item.name + " x" + slot.count,
+          right: price + "G",
+          value: { itemId: item.id, price: price }
+        });
+      }
+
+      // 売れるものが1つも無い分類は、見出しごと出さない
+      if (entries.length === 0) continue;
+
+      rows.push(this._categoryHeader(group.category));
+      for (var e = 0; e < entries.length; e++) rows.push(entries[e]);
     }
     return rows;
   };
@@ -111,10 +204,7 @@
   ShopScene.prototype.update = function (dt) {
     var input = this.game.input;
 
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
-    }
+    this.notice.update(dt);
 
     // 「戻る」ボタン。個数を決めている途中なら1つ前へ戻す
     if (this.backButton.handleInput(input)) {
@@ -125,8 +215,12 @@
     if (this.phase === "quantity") { this._updateQuantity(input); return; }
     if (this.phase === "confirm")  { this._updateConfirm(input); return; }
 
+    // 上下段のタブ。左右で「買う／売る」、上のタブは店の切り替え
     if (input.isPressed("left")) this._changeTab(-1);
     if (input.isPressed("right")) this._changeTab(1);
+    if (input.isPressed("prevTab")) this._changeShop(-1);
+    if (input.isPressed("nextTab")) this._changeShop(1);
+    if (this._clickedShopTab(input)) return;
     if (this._clickedTab(input)) return;
 
     // ScrollList が扱うのは上下移動だけ。決定・取消はここで見る
@@ -198,6 +292,18 @@
     return this.order ? this.order.price * this.order.count : 0;
   };
 
+  /** いま買おう（売ろう）としているものの名前。加護と品物の両方に対応する */
+  ShopScene.prototype._orderName = function () {
+    if (!this.order) return "";
+
+    if (this.order.mode === "blessing") {
+      var blessing = (this.game.data.blessings || {})[this.order.blessingId];
+      return (blessing && blessing.name) || this.order.blessingId;
+    }
+    var item = this.game.data.getItem(this.order.itemId);
+    return (item && item.name) || this.order.itemId;
+  };
+
   // --- はい / いいえ ---
 
   ShopScene.prototype._beginConfirm = function () {
@@ -219,8 +325,33 @@
     }
     if (result.value !== "yes") return;
 
-    if (this.order && this.order.mode === "sell") this._sell();
+    if (this.order && this.order.mode === "blessing") this._buyBlessing();
+    else if (this.order && this.order.mode === "sell") this._sell();
     else this._buy();
+  };
+
+  /** 加護を買う。恒久的に残るので、持ち物ではなく Game に記録される */
+  ShopScene.prototype._buyBlessing = function () {
+    if (!this.order) return;
+
+    var blessing = (this.game.data.blessings || {})[this.order.blessingId];
+    var result = this.game.buyBlessing(this.order.blessingId);
+
+    if (result.success) {
+      // 上限（data/run.js の activeMax）でいっぱいなら、買っても選択肢には入らない。
+      // 拠点で入れ替えてもらう必要があるので、そこまで伝える
+      var text = fill(this.texts.blessingBought, { name: blessing.name, price: this.order.price });
+      if (!this.game.isBlessingActive(this.order.blessingId)) {
+        text += this.texts.blessingFull || "";
+      }
+      this._showNotice(text);
+    } else {
+      this._showNotice(this.texts[result.reason] || result.reason);
+    }
+
+    this.order = null;
+    this.phase = "list";
+    this._refreshList();
   };
 
   /** 1つ前へ戻る（一覧まで戻っていれば拠点へ） */
@@ -231,13 +362,51 @@
   };
 
   ShopScene.prototype._changeTab = function (direction) {
+    // 加護は売れないので、この店では「買う／売る」を切り替えさせない
+    if (this._isBlessingShop()) return;
+
     this.tabIndex = (this.tabIndex + direction + TABS.length) % TABS.length;
-    this._notice = null;
+    this.notice.clear();
     this._rebuildList();
+  };
+
+  /** 店を切り替える。売る一覧は店に関係ないので、買う側に戻す */
+  ShopScene.prototype._changeShop = function (direction) {
+    var count = this.shops.length;
+    if (count <= 1) return;
+
+    this.shopIndex = (this.shopIndex + direction + count) % count;
+    this.tabIndex = 0;
+    this.notice.clear();
+    this._rebuildList();
+  };
+
+  /** 上段の店タブをマウスで押したか */
+  ShopScene.prototype._clickedShopTab = function (input) {
+    if (!input.getPointer || !input.getPointer().clicked) return false;
+
+    var T = this.layout.shopTabs;
+    if (!T) return false;
+
+    var pointer = input.getPointer();
+    for (var i = 0; i < this.shops.length; i++) {
+      var rect = { x: T.x + (T.w + T.gap) * i, y: T.y, w: T.w, h: T.h };
+      if (!NS.Panel.containsPoint(rect, pointer)) continue;
+
+      if (i !== this.shopIndex) {
+        this.shopIndex = i;
+        this.tabIndex = 0;
+        this.notice.clear();
+        this._rebuildList();
+      }
+      return true;
+    }
+    return false;
   };
 
   /** 上部の「買う / 売る」をマウスで押したか */
   ShopScene.prototype._clickedTab = function (input) {
+    if (this._isBlessingShop()) return false;   // 加護の店には「売る」が無い
     if (!input.getPointer || !input.getPointer().clicked) return false;
 
     var T = this.layout.tabs;
@@ -250,7 +419,7 @@
 
       if (i !== this.tabIndex) {
         this.tabIndex = i;
-        this._notice = null;
+        this.notice.clear();
         this._rebuildList();
       }
       return true;
@@ -261,6 +430,17 @@
   ShopScene.prototype._onConfirm = function () {
     var selected = this.list.getSelected();
     if (!selected) return;
+
+    // 加護は1つずつしか買えないので、個数を決める段は飛ばして確認へ進む
+    if (selected.value && selected.value.blessingId) {
+      this.order = {
+        mode: "blessing", blessingId: selected.value.blessingId,
+        price: selected.value.price, count: 1, max: 1
+      };
+      this._beginConfirm();
+      return;
+    }
+    if (this._isBlessingShop()) return;   // 「所持」の行など、選べないもの
 
     // 買うときも売るときも、個数と金額を確かめてから実行する
     this._beginQuantity(this.getTab(), selected.value);
@@ -304,8 +484,7 @@
   };
 
   ShopScene.prototype._showNotice = function (text) {
-    this._notice = text;
-    this._noticeTimer = NOTICE_DURATION;
+    this.notice.show(text, NOTICE_DURATION);
   };
 
   // --- 描画 ---
@@ -317,9 +496,11 @@
     this.renderer.clear(this.layout.background || "#000000", w, h);
 
     this._renderHeading();
+    this._renderShopTabs();
     this._renderTabs();
+    this._renderKeeper();
     this._renderGold();
-    this.list.render();
+    this.list.render(this.game.clock);
 
     // 個数を決めている間は、説明の代わりに注文の内容を出す
     if (this.phase === "list") this._renderDetail();
@@ -346,25 +527,41 @@
     var y = origin.y + 20;
 
     var selling = (this.order.mode === "sell");
-    var item = this.game.data.getItem(this.order.itemId);
+    var buyingBlessing = (this.order.mode === "blessing");
+    var name = this._orderName();
     var total = this._orderTotal();
     // 買えば減り、売れば増える
     var rest = (this.game.gold || 0) + (selling ? total : -total);
 
-    this.panel.drawText(item ? item.name : this.order.itemId, origin.x, y);
+    this.panel.drawText(name, origin.x, y);
     y += lh + 6;
 
-    // 個数（増減できることが分かるよう ◀▶ を添える）
-    this.panel.drawText(this.texts.countLabel || "", origin.x, y,
-      { font: t.smallFont, color: t.subTextColor });
-    this.panel.drawText("◀ " + this.order.count + " ▶",
-      rect.x + rect.w - (t.padding || 8), y,
-      { align: "right", color: t.cursorColor });
-    y += lh + 2;
+    // 加護は1つずつしか買えないので、個数の行は出さずに説明を出す
+    if (buyingBlessing) {
+      var blessing = (this.game.data.blessings || {})[this.order.blessingId];
+      if (blessing) {
+        // 枠に収まる文字数で折り返す（他の画面と同じやり方）
+        var lines = wrapText(blessing.description || "",
+          (this.layout.detail && this.layout.detail.charsPerLine) || 18);
+        for (var i = 0; i < lines.length; i++) {
+          this.panel.drawText(lines[i], origin.x, y, { font: t.smallFont, color: t.subTextColor });
+          y += lh - 2;
+        }
+        y += 8;
+      }
+    } else {
+      // 個数（増減できることが分かるよう ◀▶ を添える）
+      this.panel.drawText(this.texts.countLabel || "", origin.x, y,
+        { font: t.smallFont, color: t.subTextColor });
+      this.panel.drawText("◀ " + this.order.count + " ▶",
+        rect.x + rect.w - (t.padding || 8), y,
+        { align: "right", color: t.cursorColor });
+      y += lh + 2;
 
-    this.panel.drawText(fill(this.texts.maxCount, { max: this.order.max }), origin.x, y,
-      { font: t.smallFont, color: t.hintColor });
-    y += lh + 8;
+      this.panel.drawText(fill(this.texts.maxCount, { max: this.order.max }), origin.x, y,
+        { font: t.smallFont, color: t.hintColor });
+      y += lh + 8;
+    }
 
     // 単価と合計
     this.panel.drawText(
@@ -386,45 +583,78 @@
     if (this.phase !== "confirm") return;
 
     this.panel.drawText(
-      fill(selling ? this.texts.confirmSell : this.texts.confirmBuy,
-           { name: item ? item.name : "", count: this.order.count, price: total }),
+      buyingBlessing
+        ? fill(this.texts.confirmBlessing, { name: name, price: total })
+        : fill(selling ? this.texts.confirmSell : this.texts.confirmBuy,
+               { name: name, count: this.order.count, price: total }),
       origin.x, y, { font: t.smallFont, color: t.textColor });
 
-    this.confirmMenu.render();
+    this.confirmMenu.render(this.game.clock);
   };
 
   ShopScene.prototype._renderHeading = function () {
     var title = this.layout.title || {};
     var subtitle = this.layout.subtitle || {};
+    var shop = this.getShop();
 
     this.panel.drawText(this.texts.title || "", title.x, title.y,
       { font: title.font, color: title.color });
-    this.panel.drawText(this.texts.subtitle || "", subtitle.x, subtitle.y,
+
+    // 見出しの下は、いま見ている店の一言にする
+    var line = (shop && shop.subtitle) || this.texts.subtitle || "";
+    this.panel.drawText(line, subtitle.x, subtitle.y,
       { font: subtitle.font, color: subtitle.color });
+  };
+
+  /**
+   * 上段の店タブ。開いている店だけが並ぶ。
+   * 1軒しか開いていなくても出す（どの店にいるかが分かるように）。
+   */
+  ShopScene.prototype._renderShopTabs = function () {
+    var T = this.layout.shopTabs;
+    if (!T || this.shops.length === 0) return;
+
+    for (var i = 0; i < this.shops.length; i++) {
+      this._drawTab(T, i, this.shops[i].name || "", i === this.shopIndex);
+    }
   };
 
   ShopScene.prototype._renderTabs = function () {
     var T = this.layout.tabs;
     if (!T) return;
 
-    var t = this.theme;
     var labels = [this.texts.tabBuy || "", this.texts.tabSell || ""];
-
     for (var i = 0; i < labels.length; i++) {
-      var x = T.x + (T.w + T.gap) * i;
-      var selected = (i === this.tabIndex);
-
-      this.panel.ctx.fillStyle = selected ? "rgba(74,107,168,0.35)" : "rgba(8,10,20,0.6)";
-      this.panel.ctx.fillRect(x, T.y, T.w, T.h);
-      this.panel.ctx.strokeStyle = selected ? (t.cursorColor || "#ffd75e")
-                                            : (t.panelBorder || "#3a4266");
-      this.panel.ctx.lineWidth = 1;
-      this.panel.ctx.strokeRect(x + 0.5, T.y + 0.5, T.w - 1, T.h - 1);
-
-      this.panel.drawText(labels[i], x + T.w / 2, T.y + 20,
-        { align: "center", font: t.smallFont,
-          color: selected ? t.cursorColor : t.subTextColor });
+      this._drawTab(T, i, labels[i], i === this.tabIndex);
     }
+  };
+
+  /** タブ1つ分。上段（店）と下段（買う／売る）で見た目をそろえる */
+  ShopScene.prototype._drawTab = function (T, index, label, selected) {
+    var t = this.theme;
+    var ctx = this.panel.ctx;
+    var x = T.x + (T.w + T.gap) * index;
+
+    ctx.fillStyle = selected ? "rgba(74,107,168,0.35)" : "rgba(8,10,20,0.6)";
+    ctx.fillRect(x, T.y, T.w, T.h);
+    ctx.strokeStyle = selected ? (t.cursorColor || "#ffd75e") : (t.panelBorder || "#3a4266");
+    ctx.lineWidth = 1;
+    ctx.strokeRect(x + 0.5, T.y + 0.5, T.w - 1, T.h - 1);
+
+    this.panel.drawText(label, x + T.w / 2, T.y + Math.round(T.h / 2) + 4,
+      { align: "center", font: t.smallFont,
+        color: selected ? t.cursorColor : t.subTextColor });
+  };
+
+  /** 店主。店ごとに違う相手が立っている */
+  ShopScene.prototype._renderKeeper = function () {
+    var pos = this.layout.keeper;
+    var shop = this.getShop();
+    if (!pos || !shop || !shop.keeper) return;
+
+    var size = pos.size || 64;
+    this.sprites.drawMotion(shop.keeper, pos.x, pos.y, size, size,
+      NS.Motion.of(this.game.data, shop.keeperMotion, this.game.clock, 0));
   };
 
   ShopScene.prototype._renderGold = function () {
@@ -503,11 +733,15 @@
   };
 
   ShopScene.prototype._renderNotice = function () {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
     var pos = this.layout.notice || { x: 400, y: 530 };
 
-    this.panel.drawText(this._notice, pos.x, pos.y,
+    var ctx = this.game.ctx;
+    ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
+    this.panel.drawText(this.notice.getText(), pos.x, pos.y,
       { align: "center", color: this.theme.cursorColor });
+    ctx.restore();
   };
 
   ShopScene.prototype._renderHint = function () {
@@ -516,6 +750,8 @@
 
     if (this.phase === "quantity") hint = this.texts.hintQuantity;
     else if (this.phase === "confirm") hint = this.texts.hintConfirm;
+    // 店が1軒しか開いていないときに「店を変える」と書いても混乱するだけ
+    else if (this.shops.length > 1) hint = this.texts.hintShops || this.texts.hint;
     else hint = this.texts.hint;
 
     this.panel.drawText(hint || "", pos.x, pos.y,

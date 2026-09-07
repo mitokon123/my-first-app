@@ -22,29 +22,110 @@
     this.config = gameData.shop || {};
   }
 
+  // --- 店 ---
+
+  /**
+   * 開いている店を並べて返す。
+   * unlockedBy の判定は DungeonCatalog に任せる
+   *（ダンジョンの解放条件とまったく同じ書き方が使えるようにするため）。
+   *
+   * @param {object} cleared クリア済みダンジョンの一覧（{ id: true }）
+   * @returns {object[]} data/shop.js の shops のうち、開いているもの
+   */
+  ShopSystem.prototype.getShops = function (cleared) {
+    var shops = this.config.shops || [];
+    var result = [];
+
+    for (var i = 0; i < shops.length; i++) {
+      if (!this._isOpen(shops[i], cleared)) continue;
+      result.push(shops[i]);
+    }
+    return result;
+  };
+
+  /** まだ開いていない店も含めた全部（案内を出すときに使う） */
+  ShopSystem.prototype.getAllShops = function () {
+    return (this.config.shops || []).slice();
+  };
+
+  ShopSystem.prototype._isOpen = function (shop, cleared) {
+    if (!shop) return false;
+    if (!shop.unlockedBy) return true;
+    if (!NS.DungeonCatalog) return true;
+
+    return NS.DungeonCatalog.isConditionMet(shop.unlockedBy, cleared, this.data);
+  };
+
   // --- 品揃え ---
 
   /**
-   * 店に並んでいる品物を返す。
-   * unlockedBy が書かれているものは、そのダンジョンをクリアするまで並ばない。
+   * その店に並んでいる品物を返す。
+   * 品ごとの unlockedBy が書かれているものは、条件を満たすまで並ばない。
    *
    * @param {object} cleared クリア済みダンジョンの一覧（{ id: true }）
+   * @param {object} shop 対象の店（省略すると最初の店）
    * @returns {Array<{item:object, price:number}>}
    */
-  ShopSystem.prototype.getStock = function (cleared) {
-    var stock = this.config.stock || [];
+  ShopSystem.prototype.getStock = function (cleared, shop) {
+    var target = shop || (this.config.shops || [])[0];
+    var stock = (target && target.stock) || [];
     var result = [];
 
     for (var i = 0; i < stock.length; i++) {
       var entry = stock[i];
-      if (entry.unlockedBy && !(cleared && cleared[entry.unlockedBy])) continue;
+      if (!this._isStocked(entry, cleared)) continue;
 
       var item = this.data.getItem(entry.item);
       if (!item) continue;   // 定義が無い品は黙って飛ばす
 
-      result.push({ item: item, price: this.getBuyPrice(item, entry) });
+      result.push({
+        item: item,
+        price: this.getBuyPrice(item, entry),
+        // 同じ分類・同じ値段のときに、書いた順を保つための控え
+        listed: i
+      });
     }
+
+    var self = this;
+    result.sort(function (a, b) { return self._compareStock(a, b); });
     return result;
+  };
+
+  /**
+   * 店に並べる順番。
+   *   1. 分類（data/categories.js の item.order）… 回復 → 装備 → 素材 → 重要
+   *   2. 値段の安い順 … 手が届くものから目に入る
+   *   3. data/shop.js に書いた順 … 上の2つが同じときだけ
+   *
+   * 並び順を変えたいときは categories.js の order を入れ替えるのが手軽。
+   */
+  ShopSystem.prototype._compareStock = function (a, b) {
+    var categoryDiff = this._categoryOrder(a.item) - this._categoryOrder(b.item);
+    if (categoryDiff !== 0) return categoryDiff;
+
+    if (a.price !== b.price) return a.price - b.price;
+    return a.listed - b.listed;
+  };
+
+  ShopSystem.prototype._categoryOrder = function (item) {
+    var categories = (this.data.categories || {}).item || {};
+    var category = categories[item && item.category];
+
+    // 分類が無い品は最後に回す
+    return (category && typeof category.order === "number") ? category.order : 999;
+  };
+
+  /** その品の分類（見出しに使う）。分からなければ null */
+  ShopSystem.prototype.getCategory = function (item) {
+    var categories = (this.data.categories || {}).item || {};
+    return categories[item && item.category] || null;
+  };
+
+  ShopSystem.prototype._isStocked = function (entry, cleared) {
+    if (!entry.unlockedBy) return true;
+    if (!NS.DungeonCatalog) return true;
+
+    return NS.DungeonCatalog.isConditionMet(entry.unlockedBy, cleared, this.data);
   };
 
   /**

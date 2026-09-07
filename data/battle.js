@@ -13,9 +13,11 @@
  *   （normalAttackSkill で指定した技を使う）。
  *
  * ▼ 属性倍率
- *   倍率 = 1 - 相手の耐性 × resistance.step
+ *   耐性が0以上 … 倍率 = 1 - 耐性 × resistance.resistStep
+ *   耐性がマイナス … 倍率 = 1 + |耐性| × resistance.weaknessStep
  *   耐性は data/monsters.js の resistances（-5〜10）。
- *   immunities に入っている属性は倍率にかかわらずダメージ0。
+ *     -5 → ×2.00（2倍）   0 → ×1.00   +9 → ×0.10   +10 → 無効
+ *   耐性が immuneAt 以上、または immunities に入っている属性はダメージ0。
  *   無属性（elements.js の physical:true）は耐性の影響を受けない。
  *
  * ▼ クリティカル
@@ -43,14 +45,29 @@
       minDamage: 1
     },
 
+    /**
+     * 敵が狙う位置の重み（盤面の左から順）。
+     * 前に置いた仲間ほど狙われる。並び順が「誰を盾にするか」の選択になる。
+     * 盤面に出ている数が少ないときは、その数だけで割り直す。
+     */
+    targetWeights: [0.50, 0.35, 0.15],
+
     critical: {
       baseRate: 0.03,   // 全キャラ共通の会心率
       multiplier: 2.0   // 会心時の倍率
     },
 
+    /**
+     * 属性耐性。プラスとマイナスで1あたりの効き方を変えている。
+     *   プラス側 … 1につき resistStep だけ軽くなる（+10 で完全無効）
+     *   マイナス側 … 1につき weaknessStep だけ重くなる（-5 で2倍）
+     * 弱点のほうが1あたりの動きが大きいので、少ない値でも効きが分かる。
+     */
     resistance: {
-      step: 0.07,       // 耐性1あたりの軽減量
-      minMultiplier: 0  // 倍率の下限（マイナス倍率を防ぐ）
+      resistStep: 0.10,   // 耐性1あたりの軽減量（+9 で0.1倍まで下がる）
+      weaknessStep: 0.20, // 弱点1あたりの増加量（-5 で2.0倍）
+      immuneAt: 10,       // この値以上は完全無効（immunities と同じ扱い）
+      minMultiplier: 0    // 倍率の下限（マイナス倍率を防ぐ）
     },
 
     /**

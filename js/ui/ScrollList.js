@@ -200,7 +200,11 @@
     this.top = Math.max(0, Math.min(maxTop, this.top));
   };
 
-  ScrollList.prototype.render = function () {
+  /**
+   * @param {number} [clock] 経過ミリ秒（game.clock）。渡すとカーソルが明滅する。
+   *   渡さなければ明滅しないので、既存の呼び出しはそのままでよい。
+   */
+  ScrollList.prototype.render = function (clock) {
     var t = this.panel.theme;
     var rect = this.rect;
     this.panel.drawBox(rect);
@@ -209,6 +213,7 @@
     var rowHeight = rect.rowHeight || 24;
     var visible = rect.visibleRows || 10;
     var end = Math.min(this.rows.length, this.top + visible);
+    var cursorAlpha = cursorAlphaFor(t, clock);
 
     for (var i = this.top; i < end; i++) {
       var row = this.rows[i];
@@ -221,7 +226,7 @@
       }
 
       var selected = (i === this.index);
-      if (selected) this.panel.drawText("▶", origin.x + 6, y, { color: t.cursorColor });
+      if (selected) this._drawCursor(origin.x + 6, y, cursorAlpha, t.cursorColor);
 
       this.panel.drawText(row.label, origin.x + 24, y,
         { color: selected ? t.cursorColor : (row.color || t.textColor) });
@@ -248,6 +253,28 @@
         { font: t.smallFont, color: t.hintColor });
     }
   };
+
+  /** 選択中を示す「▶」を描く（CommandMenu と同じ見え方にそろえてある） */
+  ScrollList.prototype._drawCursor = function (x, y, alpha, color) {
+    if (alpha >= 1) {
+      this.panel.drawText("▶", x, y, { color: color });
+      return;
+    }
+
+    var ctx = this.panel.ctx;
+    ctx.save();
+    ctx.globalAlpha = ctx.globalAlpha * alpha;
+    this.panel.drawText("▶", x, y, { color: color });
+    ctx.restore();
+  };
+
+  /** カーソルの濃さ。時計が無い、または設定が無ければ明滅しない */
+  function cursorAlphaFor(theme, clock) {
+    var pulse = theme.cursorPulse;
+    if (clock === undefined || clock === null || !pulse || !NS.Motion) return 1;
+
+    return Math.max(0, Math.min(1, NS.Motion.value(pulse, clock, 0, 1)));
+  }
 
   NS.ScrollList = ScrollList;
 })(window.MyGame);

@@ -26,8 +26,10 @@
   /**
    * @param {MyGame.Game} game
    * @param {object} returnScene 閉じたときに戻るシーン
+   * @param {object} [options] { allowStorage } … false にすると預かり所を出さない
+   *   探索中は拠点の預かり所へ手が届かないので、DungeonScene から false で開く
    */
-  function PartyScene(game, returnScene) {
+  function PartyScene(game, returnScene, options) {
     this.game = game;
     this.returnScene = returnScene;
 
@@ -41,6 +43,9 @@
     this.sprites = new NS.SpriteRenderer(game.ctx, game.assets);
     this.renderer = new NS.Renderer(game.ctx);
 
+    // 預かり所は拠点にしか無い。探索中は連れている仲間の並び替えだけを行う
+    this.allowStorage = !(options && options.allowStorage === false);
+
     this.index = 0;         // カーソル位置
     this.tab = "party";     // "party" | "storage"
     // "list"（一覧）/ "action"（何をするか）/ "reorder"（並び替え先）/ "equip"（装備を選ぶ）
@@ -50,6 +55,8 @@
     this.equipList = new NS.ScrollList(this.panel, this.layout.equipList || this.layout.detail);
     this.actionMenu = new NS.CommandMenu(this.panel, this.layout.actionMenu);
     this.backButton = new NS.BackButton(this.panel, game.data);
+    // 名前をつける文字盤（Canvas では日本語入力が使えないため）
+    this.nameInput = new NS.NameInput(this.panel, game.data);
     this._notice = null;
   }
 
@@ -81,6 +88,9 @@
   PartyScene.prototype.update = function () {
     var input = this.game.input;
 
+    // 名前をつけている間は、他の操作を受け付けない（文字盤に集中させる）
+    if (this.mode === "naming") { this._updateNamingMode(input); return; }
+
     // 「戻る」ボタン。何かを選んでいる途中なら一覧へ戻す
     if (this.backButton.handleInput(input)) {
       if (this.mode === "list") this.game.scenes.change(this.returnScene);
@@ -94,9 +104,11 @@
 
     this._moveCursor(input);
 
-    // 左右で 連れていく仲間 / 預かり所 を切り替える
-    if (input.isPressed("left") || input.isPressed("right")) this._switchTab();
-    if (this._clickedTab(input)) return;
+    // 左右で 連れていく仲間 / 預かり所 を切り替える（預かり所が使えるときだけ）
+    if (this.allowStorage) {
+      if (input.isPressed("left") || input.isPressed("right")) this._switchTab();
+      if (this._clickedTab(input)) return;
+    }
 
     // E は装備への近道（一覧の項目からも選べる）
     if (input.isPressed("equip")) this._beginEquip();
@@ -192,13 +204,17 @@
     var items = [];
 
     if (this.tab === "party") {
-      items.push({ label: this.texts.actionDeposit || "deposit", value: "deposit" });
+      // 探索中は預けられない（預かり所は拠点にある）
+      if (this.allowStorage) {
+        items.push({ label: this.texts.actionDeposit || "deposit", value: "deposit" });
+      }
       items.push({ label: this.texts.actionReorder || "reorder", value: "reorder" });
     } else {
       items.push({ label: this.texts.actionTake || "take", value: "take" });
     }
 
     items.push({ label: this.texts.actionEquip || "equip", value: "equip" });
+    items.push({ label: this.texts.actionName || "name", value: "name" });
     items.push({ label: this.texts.actionCancel || "cancel", value: "cancel" });
     return items;
   };
@@ -218,7 +234,46 @@
       case "take":    this._takeFromStorage();  this.mode = "list"; break;
       case "reorder": this._beginReorder(); break;
       case "equip":   this._beginEquip(); break;
+      case "name":    this._beginNaming(); break;
     }
+  };
+
+  // --- 名前をつける ---
+
+  PartyScene.prototype._beginNaming = function () {
+    var monster = this._selected();
+    if (!monster) return;
+
+    var texts = (this.game.data.messages || {}).naming || {};
+    this.nameInput.open(
+      monster.nickname || "",
+      (texts.titleRename || "").replace("{name}", monster.getName()));
+
+    this.mode = "naming";
+    this._notice = null;
+  };
+
+  PartyScene.prototype._updateNamingMode = function (input) {
+    var result = this.nameInput.handleInput(input);
+    if (!result) return;
+
+    var texts = (this.game.data.messages || {}).naming || {};
+
+    if (result.type === "cancel") {
+      this._notice = texts.keptName || null;
+      this.mode = "list";
+      return;
+    }
+
+    var monster = this._selected();
+    if (monster) {
+      var before = monster.getName();
+      monster.setNickname(result.name);
+      this._notice = (texts.renamed || "")
+        .replace("{old}", before)
+        .replace("{new}", monster.getName());
+    }
+    this.mode = "list";
   };
 
   // --- 並び替え ---
@@ -429,7 +484,15 @@
     }
 
     // 「この仲間に何をするか」の項目
-    if (this.mode === "action") this.actionMenu.render();
+    if (this.mode === "action") this.actionMenu.render(this.game.clock);
+
+    // 名前をつけている間は、文字盤を画面の手前に重ねる。
+    // 案内は文字盤が自分で出すので、ここのヒントと「戻る」は出さない
+    // （文字盤の間は他の操作を受け付けないため、押せるものを見せない）
+    if (this.mode === "naming") {
+      this.nameInput.render(this.game.clock);
+      return;
+    }
 
     this._renderHint(L, t);
     this.backButton.render();
@@ -440,7 +503,7 @@
     var t = this.theme;
     var rect = this.layout.equipList || this.layout.detail;
 
-    this.equipList.render();
+    this.equipList.render(this.game.clock);
 
     var label = fill(this.texts.equipTitle, { name: monster ? monster.getName() : "" });
     this.panel.drawText(label, rect.x + (t.padding || 8), rect.y - 8,
@@ -556,11 +619,15 @@
     var labels = [
       { id: "party",
         text: (this.texts.tabParty || "party") +
-              " " + (party ? party.size() : 0) + "/" + (party ? party.maxSize : 0) },
-      { id: "storage",
-        text: (this.texts.tabStorage || "storage") +
-              " " + (storage ? storage.size() : 0) + "/" + (storage ? storage.maxSize : 0) }
+              " " + (party ? party.size() : 0) + "/" + (party ? party.maxSize : 0) }
     ];
+
+    // 預かり所へ手が届かない場面（探索中）では、表そのものを出さない
+    if (this.allowStorage) {
+      labels.push({ id: "storage",
+        text: (this.texts.tabStorage || "storage") +
+              " " + (storage ? storage.size() : 0) + "/" + (storage ? storage.maxSize : 0) });
+    }
 
     for (var i = 0; i < labels.length; i++) {
       var selected = (labels[i].id === this.tab);
@@ -584,7 +651,10 @@
     else if (this.tab === "storage" && this.game.storage.isEmpty()) {
       // 何も預けていないときは「どうすれば預けられるか」を出す
       hint = this.texts.hintStorageEmpty;
-    } else hint = this.texts.hintNormal;
+    }
+    // 探索中は表の切り替えが無いので、その案内を出さない
+    else if (!this.allowStorage) hint = this.texts.hintNoStorage || this.texts.hintNormal;
+    else hint = this.texts.hintNormal;
 
     this.panel.drawText(hint || "", L.hint.x, L.hint.y,
       { color: t.hintColor, font: t.smallFont });
@@ -616,11 +686,18 @@
       this.panel.drawText("◆", rect.x - 18, rect.y + 16, { color: t.cursorColor });
     }
 
-    // スプライト
-    var size = L.spriteSize;
-    this.sprites.draw(monster.getSpriteId(), rect.x + 8, rect.y + (rect.h - size) / 2, size, size);
+    // スプライト。種族ごとの大きさ（sizeScale）を掛けたうえで、
+    // 中心をそろえて描く（行の高さは変わらないので、はみ出しは上下に散る）
+    var base = L.spriteSize;
+    var size = Math.round(base * (monster.getSizeScale ? monster.getSizeScale() : 1));
+    var sprite = monster.getSpriteId();
+    this.sprites.drawMotion(sprite,
+      rect.x + 8 - (size - base) / 2, rect.y + (rect.h - size) / 2, size, size,
+      NS.Motion.forSprite(this.game.data, sprite, monster.getMotionId(),
+        this.game.clock, monster.getMotionPhase()));
 
-    var textX = rect.x + size + 20;
+    // 文字の開始位置は元の大きさで決める（大きい相手でも行がずれないように）
+    var textX = rect.x + base + 20;
 
     // 盤面に出る位置（先頭から battleFieldSize 体）に印をつける（パーティ側のみ）
     var fieldSize = this.game.data.config.battleFieldSize || 3;
@@ -731,6 +808,52 @@
       this.panel.drawText("・" + (item ? item.name : equipped[i]), x, y,
         { color: t.subTextColor, font: t.smallFont });
       y += lh;
+    }
+
+    this._renderResistances(monster, x, y + 4, rect);
+  };
+
+  /**
+   * 全属性の耐性を、2列の表にして出す。
+   *
+   * ★ ここで出すのは monster.getResistance()。
+   *   種族の耐性だけでなく、装備の resistBonus（炎よけの札・宵よけの札）まで
+   *   足したあとの値なので、「着けたらどう変わるか」がこの画面で分かる。
+   *   0（等倍）の属性も省かずに並べる —— 何が等倍なのかも知りたい情報のため。
+   */
+  PartyScene.prototype._renderResistances = function (monster, x, y, rect) {
+    if (!monster.getResistance) return;
+
+    var t = this.theme;
+    var lh = t.lineHeight || 18;
+    var elements = this.game.data.elements || {};
+
+    // elements.js の order 順に並べる（図鑑や技一覧と同じ並び）
+    var ids = Object.keys(elements).filter(function (id) { return id !== "none"; });
+    ids.sort(function (a, b) {
+      return (elements[a].order || 0) - (elements[b].order || 0);
+    });
+
+    this.panel.drawText(this.texts.resistanceLabel || "", x, y, { font: t.smallFont });
+    y += lh;
+
+    var colWidth = Math.floor(((rect.w - (t.padding || 8) * 2)) / 2);
+
+    for (var i = 0; i < ids.length; i++) {
+      var element = elements[ids[i]];
+      var value = monster.getResistance(ids[i]) || 0;
+
+      // 強いところは青、弱いところは赤。等倍は目立たせない
+      var color = t.hintColor;
+      if (value > 0) color = t.hpBarFull || "#4fb0d1";
+      else if (value < 0) color = t.hpBarLow || "#e8542a";
+
+      var text = element.name + " " + (value > 0 ? "+" : "") + value;
+      var col = i % 2;
+      this.panel.drawText(text, x + col * colWidth, y,
+        { color: color, font: t.smallFont });
+
+      if (col === 1) y += lh;
     }
   };
 

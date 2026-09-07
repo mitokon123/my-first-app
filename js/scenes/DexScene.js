@@ -18,10 +18,10 @@
 
   /**
    * 表の並び。
-   * モンスター・アイテム・特性は「出会ったもの」を集める図鑑、
+   * モンスター・アイテム・特性・技は「出会ったもの」を集める図鑑、
    * 性格・加護は「どんなものがあるか」を確かめる一覧（最初から全部見える）。
    */
-  var TABS = ["monsters", "items", "abilities", "natures", "blessings"];
+  var TABS = ["monsters", "items", "abilities", "skills", "natures", "blessings"];
 
   /**
    * @param {MyGame.Game} game
@@ -67,6 +67,7 @@
     if (tab === "monsters") rows = this._buildMonsterRows();
     else if (tab === "items") rows = this._buildItemRows();
     else if (tab === "abilities") rows = this._buildAbilityRows();
+    else if (tab === "skills") rows = this._buildSkillRows();
     else if (tab === "natures") rows = this._buildNatureRows();
     else rows = this._buildBlessingRows();
 
@@ -141,6 +142,70 @@
       var known = this._isAbilityKnown(id);
       return {
         label: known ? ability.name : (this.texts.unknownName || "???"),
+        right: known ? (this.texts.knownLabel || "") : "",
+        value: id
+      };
+    }.bind(this));
+  };
+
+  /**
+   * 図鑑に載せる技だけを集める。
+   * 通常攻撃のように showInDex: false と書かれたものは外す
+   * （覚える技ではなくコマンドなので、集める対象にならない）。
+   */
+  DexScene.prototype._dexSkills = function () {
+    var skills = this.game.data.skills || {};
+    var result = {};
+
+    for (var id in skills) {
+      if (!Object.prototype.hasOwnProperty.call(skills, id)) continue;
+      if (skills[id].showInDex === false) continue;
+      result[id] = skills[id];
+    }
+    return result;
+  };
+
+  /**
+   * その技が判明しているか。
+   * 覚えるモンスターを1体でも仲間にしていれば分かる、という扱い（特性と同じ考え方）。
+   * @param {string} skillId
+   */
+  DexScene.prototype._isSkillKnown = function (skillId) {
+    return this._learnersOf(skillId, true).length > 0;
+  };
+
+  /**
+   * その技を覚えるモンスターを探す。
+   * @param {string} skillId
+   * @param {boolean} caughtOnly 仲間にしたものだけに絞るか
+   * @returns {object[]} [{ monster, level }] level は覚えるレベル
+   */
+  DexScene.prototype._learnersOf = function (skillId, caughtOnly) {
+    var monsters = this.game.data.monsters || {};
+    var discovery = this.game.discovery;
+    var result = [];
+
+    for (var id in monsters) {
+      if (!Object.prototype.hasOwnProperty.call(monsters, id)) continue;
+      var level = learnLevel(monsters[id], skillId);
+      if (level === null) continue;
+      if (caughtOnly && !discovery.isMonsterCaught(id)) continue;
+      result.push({ monster: monsters[id], level: level });
+    }
+    return result;
+  };
+
+  /**
+   * 技を属性ごとに並べる。
+   * 分類を持たないので、属性そのものを見出しに使う（色も属性の色になる）。
+   */
+  DexScene.prototype._buildSkillRows = function () {
+    var data = this.game.data;
+
+    return buildRows(this._dexSkills(), data.elements || {}, "element", function (id, skill) {
+      var known = this._isSkillKnown(id);
+      return {
+        label: known ? skill.name : (this.texts.unknownName || "???"),
         right: known ? (this.texts.knownLabel || "") : "",
         value: id
       };
@@ -280,6 +345,7 @@
     if (tab === "monsters") content = this._buildMonsterDetail();
     else if (tab === "items") content = this._buildItemDetail();
     else if (tab === "abilities") content = this._buildAbilityDetail();
+    else if (tab === "skills") content = this._buildSkillDetail();
     else if (tab === "natures") content = this._buildNatureDetail();
     else content = this._buildBlessingDetail();
 
@@ -350,7 +416,7 @@
     this._renderHeading();
     this._renderTabs();
     this._renderProgress();
-    this.list.render();
+    this.list.render(this.game.clock);
 
     this._renderDetail();
     this._renderHint();
@@ -373,8 +439,15 @@
     var lh = t.lineHeight || 18;
 
     if (m.content.sprite) {
-      var size = rect.spriteSize || 72;
-      this.sprites.draw(m.content.sprite, rect.x + (rect.w - size) / 2, origin.y + 6, size, size);
+      // 種族ごとの大きさ（sizeScale）。下端をそろえて上へ伸ばすので、
+      // 大きい相手でも下の説明文に食い込まない
+      var base = rect.spriteSize || 72;
+      var size = Math.round(base * (m.content.sizeScale || 1));
+      // 図鑑でも種族ごとの動きを見せる（どんな動き方をするのか分かるように）
+      this.sprites.drawMotion(m.content.sprite,
+        rect.x + (rect.w - size) / 2, origin.y + 6 + (base - size), size, size,
+        NS.Motion.forSprite(this.game.data, m.content.sprite, m.content.motion,
+          this.game.clock, 0));
     }
 
     // 内容が変わって行数が減った場合に、行き過ぎたままにならないようにする
@@ -431,8 +504,8 @@
 
     var t = this.theme;
     var labels = [this.texts.tabMonsters || "", this.texts.tabItems || "",
-                  this.texts.tabAbilities || "", this.texts.tabNatures || "",
-                  this.texts.tabBlessings || ""];
+                  this.texts.tabAbilities || "", this.texts.tabSkills || "",
+                  this.texts.tabNatures || "", this.texts.tabBlessings || ""];
 
     for (var i = 0; i < labels.length; i++) {
       var x = T.x + (T.w + T.gap) * i;
@@ -467,11 +540,14 @@
     } else if (tab === "items") {
       text = (this.texts.obtainedLabel || "") + " " + discovery.countItemsObtained() +
              " / " + Object.keys(data.items).length;
-    } else if (tab === "abilities") {
-      var ids = Object.keys(data.abilities || {});
+    } else if (tab === "abilities" || tab === "skills") {
+      var isKnown = (tab === "abilities")
+        ? this._isAbilityKnown.bind(this)
+        : this._isSkillKnown.bind(this);
+      var ids = Object.keys((tab === "abilities" ? data.abilities : this._dexSkills()) || {});
       var known = 0;
       for (var i = 0; i < ids.length; i++) {
-        if (this._isAbilityKnown(ids[i])) known++;
+        if (isKnown(ids[i])) known++;
       }
       text = (this.texts.knownLabel || "") + " " + known + " / " + ids.length;
     } else {
@@ -526,7 +602,8 @@
     // 仲間にしたものだけ、より詳しい情報と説明を見せる
     if (!discovery.isMonsterCaught(selected.value)) {
       lines.push({ text: this.texts.notCaught || "", color: t.hintColor });
-      return { sprite: monster.sprite, lines: lines };
+      return { sprite: monster.sprite, motion: monster.motion,
+               sizeScale: monster.sizeScale || 1, lines: lines };
     }
 
     lines.push({ text: (this.texts.scoutLabel || "") + " " +
@@ -534,6 +611,9 @@
 
     // 耐性（0でないものだけ）
     this._pushResistanceLines(lines, monster, data);
+
+    // 落とすもの。一度でも仲間にすれば、そのモンスターから取れるものが全て分かる
+    this._pushDropLines(lines, monster, data);
 
     // 特性（アビリティ）は名前と効果の説明を出す
     var abilities = this.abilitySystem.resolveAbilities(monster);
@@ -546,7 +626,39 @@
     lines.push({ text: "" });
     this._pushWrapped(lines, monster.description);
 
-    return { sprite: monster.sprite, lines: lines };
+    return { sprite: monster.sprite, motion: monster.motion, lines: lines };
+  };
+
+  /**
+   * 落とすものを「・薬草  15%」の形で並べる。
+   *
+   * 一度でも仲間にすれば、その種族から取れるものが全て見えるようになる。
+   * まだ拾ったことのない品も出す —— 何が取れるか分からないまま
+   * 同じ相手を延々と倒し続ける、という状態を避けるため。
+   * （落とさない種族では、見出しごと出さない）
+   */
+  DexScene.prototype._pushDropLines = function (lines, monster, data) {
+    var drops = monster.drops || [];
+    if (drops.length === 0) return;
+
+    var t = this.theme;
+    lines.push({ text: "" });
+    lines.push({ text: this.texts.dropLabel || "", color: t.cursorColor });
+
+    for (var i = 0; i < drops.length; i++) {
+      var item = data.getItem(drops[i].item);
+      if (!item) continue;
+
+      // 個数に幅があるものは「（1〜2個）」を添える
+      var min = (drops[i].min === undefined) ? 1 : drops[i].min;
+      var max = (drops[i].max === undefined) ? min : drops[i].max;
+      var count = (max > min) ? ("（" + min + "〜" + max + "個）") : "";
+
+      lines.push({
+        text: "・" + item.name + count + "  " + Math.round((drops[i].rate || 0) * 100) + "%",
+        color: t.subTextColor
+      });
+    }
   };
 
   /** 0以外の耐性を「属性 +2」の形で並べる */
@@ -644,6 +756,91 @@
         lines.push({ text: "・" + owners[i].name });
       }
     }
+    return { sprite: null, lines: lines };
+  };
+
+  /** 技の詳細を行の配列にする */
+  DexScene.prototype._buildSkillDetail = function () {
+    var selected = this.list.getSelected();
+    if (!selected) return null;
+
+    var data = this.game.data;
+    var skill = data.getSkill(selected.value);
+    if (!skill) return null;
+
+    var t = this.theme;
+    var lines = [];
+
+    // まだ覚えるモンスターを仲間にしていなければ伏せる
+    if (!this._isSkillKnown(selected.value)) {
+      lines.push({ text: this.texts.unknownName || "???", font: t.font, color: t.textColor });
+      lines.push({ text: "" });
+      lines.push({ text: this.texts.unknownSkill || "" });
+      return { sprite: null, lines: lines };
+    }
+
+    lines.push({ text: skill.name, font: t.font, color: t.textColor });
+
+    var element = (data.elements || {})[skill.element];
+    lines.push({ text: (this.texts.elementLabel || "") + " " + (element ? element.name : "-"),
+                 color: element ? element.color : null });
+
+    // 威力0の意味は技によって違う。
+    //   ふつうの技 … 通常攻撃と同じ計算なので「-」と出す
+    //   支援の技（回復・バフ・デバフ） … そもそもダメージを与えないので、行ごと出さない
+    //     （キュアに「威力 -」と並ぶと、殴る技のように見えてしまうため）
+    var isSupport = !skill.power && (skill.modifier || skill.heal);
+    if (skill.power) {
+      lines.push({ text: (this.texts.powerLabel || "") + " " + skill.power });
+    } else if (!isSupport) {
+      lines.push({ text: (this.texts.powerLabel || "") + " " + (this.texts.powerNormal || "-") });
+    }
+    lines.push({ text: (this.texts.ppLabel || "") + " " + (skill.pp || 0) });
+
+    // accuracy を書いていない技は data/battle.js の既定値で当たる
+    var fallback = (data.battle || {}).defaultAccuracy;
+    var accuracy = (skill.accuracy === undefined)
+      ? ((fallback === undefined) ? 1 : fallback)
+      : skill.accuracy;
+    lines.push({ text: (this.texts.accuracyLabel || "") + " " +
+                       Math.round(accuracy * 100) + "%" });
+
+    if (skill.criticalBonus) {
+      lines.push({ text: (this.texts.criticalLabel || "") + " +" +
+                         Math.round(skill.criticalBonus * 100) + "%" });
+    }
+
+    // 一時的な強化・弱体（バフ／デバフ）。効果の説明は EffectSystem に任せる
+    if (skill.modifier) {
+      lines.push({ text: "" });
+      lines.push({ text: (this.texts.modifierLabel || "") + " " +
+                         (this.texts.durationLabel || "{n}ターン")
+                           .replace("{n}", skill.modifier.duration || 1),
+                   color: t.cursorColor });
+
+      var mods = skill.modifier.effects || [];
+      for (var m = 0; m < mods.length; m++) {
+        var line = NS.EffectSystem.describeEffect(mods[m], data);
+        if (line) lines.push({ text: "・" + line });
+      }
+      if (skill.target === "self") {
+        lines.push({ text: this.texts.selfTarget || "", color: t.hintColor });
+      }
+    }
+
+    lines.push({ text: "" });
+    this._pushWrapped(lines, skill.description);
+
+    // 仲間にしたモンスターのうち、この技を覚えるもの
+    var learners = this._learnersOf(selected.value, true);
+    if (learners.length > 0) {
+      lines.push({ text: "" });
+      lines.push({ text: this.texts.learnerLabel || "", color: t.cursorColor });
+      for (var i = 0; i < learners.length; i++) {
+        lines.push({ text: "・" + learners[i].monster.name + " Lv" + learners[i].level });
+      }
+    }
+
     return { sprite: null, lines: lines };
   };
 
@@ -797,6 +994,21 @@
       rows.push(entry);
     }
     return rows;
+  }
+
+  /**
+   * その種族がその技を覚えるレベル。覚えないなら null。
+   * 同じ技が複数の行に書かれていても、いちばん早いレベルを返す。
+   */
+  function learnLevel(species, skillId) {
+    var learnset = (species && species.learnset) || [];
+    var found = null;
+
+    for (var i = 0; i < learnset.length; i++) {
+      if (learnset[i].skill !== skillId) continue;
+      if (found === null || learnset[i].level < found) found = learnset[i].level;
+    }
+    return found;
   }
 
   /** 文字数で折り返す（等幅フォント前提の簡易処理） */

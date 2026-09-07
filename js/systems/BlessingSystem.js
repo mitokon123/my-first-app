@@ -29,12 +29,14 @@
    * 同じものは1回の選択肢の中に重複して出ない。
    *
    * @param {MyGame.RunSession} run いま挑戦中のラン（既に持っている加護を除くために使う）
+   * @param {MyGame.Game} [game] 買った加護・外している加護を見るために使う。
+   *   省略すると、鍵の掛かっていない加護だけが候補になる
    * @returns {object[]} data/blessings.js の定義。候補が無ければ空
    */
-  BlessingSystem.prototype.pickChoices = function (run) {
+  BlessingSystem.prototype.pickChoices = function (run, game) {
     if (!this.isEnabled()) return [];
 
-    var pool = this._availablePool(run);
+    var pool = this._availablePool(run, game);
     var count = Math.min(this.config.choiceCount || 3, pool.length);
     var choices = [];
 
@@ -49,10 +51,14 @@
   };
 
   /**
-   * 候補になりうる加護。
-   * allowRepeat が false なら、既に持っているものは出ない。
+   * 候補になりうる加護。次の3つを満たすものだけが残る。
+   *   1. このランでまだ取っていない（allowRepeat が true なら無視）
+   *   2. 持っている（locked: true のものは、謎の商人から買っていること）
+   *   3. 拠点の画面で選択肢から外していない
+   *
+   * game を渡さない場合は 2・3 を見ない（鍵の掛かった加護だけを弾く）。
    */
-  BlessingSystem.prototype._availablePool = function (run) {
+  BlessingSystem.prototype._availablePool = function (run, game) {
     var blessings = this.data.blessings || {};
     var allowRepeat = (this.config.allowRepeat === true);
     var pool = [];
@@ -60,6 +66,12 @@
     for (var id in blessings) {
       if (!Object.prototype.hasOwnProperty.call(blessings, id)) continue;
       if (!allowRepeat && run && run.hasBlessing(id)) continue;
+
+      if (game && game.isBlessingActive) {
+        if (!game.isBlessingActive(id)) continue;
+      } else if (blessings[id].locked) {
+        continue;   // 買ったかどうか分からないので、鍵の掛かったものは出さない
+      }
       pool.push(blessings[id]);
     }
     return pool;

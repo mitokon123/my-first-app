@@ -6,6 +6,8 @@
  *   特性（アビリティ）… 種族が持つもの。AbilitySystem が「どれが効くか」を決める
  *   装備             … 個体が身につけているもの（data/items.js の equip）
  *   加護（ラン限定）  … 階を降りるたびに選んだもの。個体の runEffects に入っている
+ *   主の補正         … ボスとして出ているあいだだけ。個体の bossEffects に入っている
+ *   バフ／デバフ      … 技でかかるもの。個体の modifiers に入っている（戦闘のあいだだけ）
  *
  * 出どころが増えても collectEffects に1つ足すだけでよく、
  * ステータス計算も戦闘のダメージ計算も変更しなくてよい。
@@ -15,6 +17,7 @@
  *   { type:"statBonus",      stat:"defense", value:3 }
  *   { type:"damageDealt",    value:1.25, element:"fire" }
  *   { type:"damageTaken",    value:0.9 }
+ *   { type:"resistBonus",    element:"fire", value:3 }  … 耐性の数値そのものを上げる
  *
  * ▼ 倍率と加算の違い
  *   statMultiplier は掛け算、statBonus は足し算。
@@ -56,6 +59,18 @@
     // 加護（そのラン限り）。拠点へ戻ると Game が消す
     if (monster.runEffects && monster.runEffects.length > 0) {
       effects = effects.concat(monster.runEffects);
+    }
+
+    // 主としての補正（data/bosses.js の statMultiplier）。
+    // 敵として立ちはだかっている個体にだけ付いていて、仲間にすると外れる
+    if (monster.bossEffects && monster.bossEffects.length > 0) {
+      effects = effects.concat(monster.bossEffects);
+    }
+
+    // バフ／デバフ（その戦闘のあいだだけ）。ターン数で切れ、戦闘終了で消える
+    var modifiers = monster.modifiers || [];
+    for (i = 0; i < modifiers.length; i++) {
+      effects = effects.concat(modifiers[i].effects || []);
     }
 
     return effects;
@@ -112,6 +127,21 @@
     var self = this;
     return this._multiply(monster, function (effect) {
       if (effect.type !== "damageDealt") return null;
+      if (effect.element && effect.element !== elementId) return null;
+      if (!self._matchCondition(monster, effect.condition)) return null;
+      return effect.value;
+    });
+  };
+
+  /**
+   * 属性への耐性そのものへの加算（何も無ければ 0）。
+   * 倍率ではなく「耐性の数値」を動かすので、
+   * data/monsters.js の resistances に書いたのと同じ重みで効く。
+   */
+  EffectSystem.prototype.getResistBonus = function (monster, elementId) {
+    var self = this;
+    return this._sum(monster, function (effect) {
+      if (effect.type !== "resistBonus") return null;
       if (effect.element && effect.element !== elementId) return null;
       if (!self._matchCondition(monster, effect.condition)) return null;
       return effect.value;

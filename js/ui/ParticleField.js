@@ -4,12 +4,18 @@
  * 背景に奥行きを出したい場面で使い回せるようにしている。
  *
  * 粒子の数・速さ・色などは data/ui.js から受け取る（このファイルに数値を書かない）。
+ *
+ * 手前と奥で速さ・大きさ・濃さを変えた層を重ねると奥行きが出る。
+ * そのときは createLayers に配列を渡して、まとめて作る。
  */
 (function (NS) {
   "use strict";
 
   /**
-   * @param {object} params { count, color, minSize, maxSize, minSpeed, maxSpeed, minAlpha, maxAlpha }
+   * @param {object} params
+   *   { count, color, minSize, maxSize, minSpeed, maxSpeed, minAlpha, maxAlpha,
+   *     minDriftX, maxDriftX }
+   *   minDriftX / maxDriftX は横に流れる速さ（1秒あたりpx）。省略すると真下に落ちる
    * @param {number} width 表示領域の幅
    * @param {number} height 表示領域の高さ
    * @param {MyGame.Random} [random]
@@ -22,6 +28,19 @@
     this.particles = [];
     this._spawnAll();
   }
+
+  /**
+   * 層をまとめて作る。手前ほど大きく速く、奥ほど小さく遅くすると奥行きが出る。
+   * @param {object[]} list data/ui.js に並べた層の設定
+   * @returns {ParticleField[]} 奥から順に update / render すればよい
+   */
+  ParticleField.createLayers = function (list, width, height, random) {
+    var fields = [];
+    for (var i = 0; i < (list || []).length; i++) {
+      fields.push(new ParticleField(list[i], width, height, random));
+    }
+    return fields;
+  };
 
   ParticleField.prototype._spawnAll = function () {
     var count = this.params.count || 0;
@@ -55,25 +74,33 @@
       y: y,
       size: range(r, p.minSize, p.maxSize),
       speed: speed,
+      driftX: range(r, p.minDriftX, p.maxDriftX),
       alpha: range(r, p.minAlpha, p.maxAlpha)
     };
   };
 
   /**
    * 位置を更新する。画面の外へ抜けた粒子は反対側から出し直す。
+   * 横に流れて端に着いた粒子は、反対の端へ回り込ませる（数を保つため）。
    * @param {number} dt 経過ミリ秒
    */
   ParticleField.prototype.update = function (dt) {
     var seconds = dt / 1000;
+
     for (var i = 0; i < this.particles.length; i++) {
       var particle = this.particles[i];
       particle.y += particle.speed * seconds;
+      particle.x += particle.driftX * seconds;
 
       var goneDown = particle.speed >= 0 && particle.y > this.height;
       var goneUp = particle.speed < 0 && particle.y < 0;
       if (goneDown || goneUp) {
         this.particles[i] = this._createParticle(false);
+        continue;
       }
+
+      if (particle.x < -particle.size) particle.x = this.width;
+      else if (particle.x > this.width) particle.x = -particle.size;
     }
   };
 

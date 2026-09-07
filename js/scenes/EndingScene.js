@@ -32,6 +32,8 @@
       this.game.gold = null;
       this.game.discovery = null;
       this.game.clearedDungeons = null;
+      this.game.boughtBlessings = null;
+      this.game.offBlessings = null;
       this.game.run = null;
       this.game.scenes.change(new NS.TitleScene(this.game));
     }

@@ -36,15 +36,14 @@
     this.craftSystem = new NS.CraftSystem(game.data);
 
     this.phase = "list";   // "list" | "confirm"
-    this._notice = null;
-    this._noticeTimer = 0;
+    this.notice = new NS.Notice(this.theme.notice);
 
     this._rebuildList();
   }
 
   CraftScene.prototype.enter = function () {
     this.phase = "list";
-    this._notice = null;
+    this.notice.clear();
     this._rebuildList();
   };
 
@@ -82,10 +81,7 @@
   CraftScene.prototype.update = function (dt) {
     var input = this.game.input;
 
-    if (this._noticeTimer > 0) {
-      this._noticeTimer -= dt;
-      if (this._noticeTimer <= 0) this._notice = null;
-    }
+    this.notice.update(dt);
 
     // 「戻る」ボタン。確認の途中なら一覧へ戻す
     if (this.backButton.handleInput(input)) {
@@ -156,8 +152,7 @@
   };
 
   CraftScene.prototype._showNotice = function (text) {
-    this._notice = text;
-    this._noticeTimer = NOTICE_DURATION;
+    this.notice.show(text, NOTICE_DURATION);
   };
 
   // --- 描画 ---
@@ -170,10 +165,10 @@
 
     this._renderHeading();
     this._renderGold();
-    this.list.render();
+    this.list.render(this.game.clock);
     this._renderDetail();
 
-    if (this.phase === "confirm") this.confirmMenu.render();
+    if (this.phase === "confirm") this.confirmMenu.render(this.game.clock);
 
     this._renderNotice();
     this._renderHint();
@@ -283,11 +278,15 @@
   };
 
   CraftScene.prototype._renderNotice = function () {
-    if (!this._notice) return;
+    if (!this.notice.isActive()) return;
     var pos = this.layout.notice || { x: 400, y: 526 };
 
-    this.panel.drawText(this._notice, pos.x, pos.y,
+    var ctx = this.game.ctx;
+    ctx.save();
+    ctx.globalAlpha = this.notice.getAlpha();
+    this.panel.drawText(this.notice.getText(), pos.x, pos.y,
       { align: "center", color: this.theme.cursorColor });
+    ctx.restore();
   };
 
   CraftScene.prototype._renderHint = function () {
