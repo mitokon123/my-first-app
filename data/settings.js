@@ -21,6 +21,14 @@
   NS.rawData.settings = {
     storageKey: "abyss-chronicle.settings",
     items: [
+      /**
+       * 別の画面を開く項目。
+       *   type: "action" … 左右では変わらない。決定で action の画面が開く
+       * ★ 数値ではないので、横棒ではなく「いまの中身」が右に出る。
+       *   開く先を増やすときは、SettingsScene._activate に1行 case を足す。
+       */
+      { id: "playerLook", label: "名前と見た目", type: "action", action: "playerSetup" },
+
       // 戦闘の演出の速さ。1が最も遅く、8が最速。
       // 実際の倍率は data/ui.js の battle.animation.speedTable で決まる。
       //   最も遅い 1240ms ／ 標準 620ms ／ 最速 221ms（出来事1つあたり）
@@ -43,6 +51,14 @@
       { id: "scrollSpeed", label: "スクロール速度", type: "range",
         min: 1, max: 5, step: 1, default: 1,
         valueLabels: ["1行ずつ", "2行ずつ", "3行ずつ", "4行ずつ", "5行ずつ"] },
+
+      // 初めての場面で出る説明を出すか。
+      //   ふきだしの Esc を押すと、ここが「出さない」に変わる。
+      //   戻せば、まだ見ていない説明はまた出る（一度見たものは出ない）。
+      //   ★ 0/1 の2択なので range のまま作れる。専用の型は要らない
+      { id: "tutorial", label: "チュートリアル", type: "range",
+        min: 0, max: 1, step: 1, default: 1,
+        valueLabels: ["出さない", "出す"] },
 
       { id: "masterVolume", label: "全体音量", type: "range",
         min: 0, max: 100, step: 10, default: 70, unit: "%" },

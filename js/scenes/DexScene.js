@@ -81,10 +81,26 @@
     });
   };
 
+  /**
+   * その加護をもう知っているか。
+   *
+   * 最初から選択肢に出るもの（locked でないもの）は、いつでも見える。
+   * 謎の商人が売っているもの（locked）は、買うまで伏せる。
+   * 買わないと一生出会わない加護の名前と効果が、図鑑で先に見えてしまうため。
+   */
+  DexScene.prototype._isBlessingKnown = function (id, blessing) {
+    if (!blessing.locked) return true;
+    return !!(this.game.hasBoughtBlessing && this.game.hasBoughtBlessing(id));
+  };
+
   /** 加護を並べる（出やすさは言葉で右に出す） */
   DexScene.prototype._buildBlessingRows = function () {
     var data = this.game.data;
     return flatRows(data.blessings, function (id, blessing) {
+      var known = this._isBlessingKnown(id, blessing);
+      if (!known) {
+        return { label: this.texts.unknownName || "???", value: id };
+      }
       var rarity = NS.BlessingSystem.getRarity(data, blessing);
       return {
         label: blessing.name,
@@ -92,7 +108,7 @@
         rightColor: rarity.color,
         value: id
       };
-    });
+    }.bind(this));
   };
 
   /**
@@ -167,11 +183,18 @@
 
   /**
    * その技が判明しているか。
-   * 覚えるモンスターを1体でも仲間にしていれば分かる、という扱い（特性と同じ考え方）。
+   *
+   * ★ 条件は「仲間が実際に覚えたか」。種族を捕まえただけでは判明しない。
+   *   技はレベルで覚えるので、捕獲を条件にしていたころは
+   *   Lv1のスライムを1体捕まえただけで、Lv11で覚える「キュア」まで出ていた。
+   *   特性は種族そのものが持つものなので、そちらは捕獲だけで判明してよい。
+   *
+   * 記録は Discovery が持つ（逃がした個体が覚えていた技も残る）。
    * @param {string} skillId
    */
   DexScene.prototype._isSkillKnown = function (skillId) {
-    return this._learnersOf(skillId, true).length > 0;
+    var discovery = this.game.discovery;
+    return !!(discovery && discovery.isSkillLearned(skillId));
   };
 
   /**
@@ -229,11 +252,19 @@
     }.bind(this));
   };
 
-  /** アイテムを分類（category）ごとに並べる */
+  /**
+   * アイテムを分類（category）ごとに並べる。
+   * 装備は「装備」のくくりの中で、さらに武器・防具・アクセサリーに分ける（見やすさのため）
+   */
   DexScene.prototype._buildItemRows = function () {
     var data = this.game.data;
     var discovery = this.game.discovery;
     var categories = (data.categories || {}).item || {};
+
+    var subgroups = {
+      keyOf: function (id, item) { return item.equip ? NS.EffectSystem.slotOf(item) : null; },
+      defs: (data.categories || {}).equipSlot || {}
+    };
 
     return buildRows(data.items, categories, "category", function (id, item) {
       var obtained = discovery.isItemObtained(id);
@@ -242,7 +273,7 @@
         right: obtained ? (this.texts.obtainedLabel || "") : "",
         value: id
       };
-    }.bind(this));
+    }.bind(this), subgroups);
   };
 
   // --- 更新 ---
@@ -550,10 +581,18 @@
         if (isKnown(ids[i])) known++;
       }
       text = (this.texts.knownLabel || "") + " " + known + " / " + ids.length;
+    } else if (tab === "blessings") {
+      // 買わないと出会えない加護があるので、集めた数として出す
+      var blessings = data.blessings || {};
+      var ids = Object.keys(blessings);
+      var owned = 0;
+      for (var b = 0; b < ids.length; b++) {
+        if (this._isBlessingKnown(ids[b], blessings[ids[b]])) owned++;
+      }
+      text = (this.texts.knownLabel || "") + " " + owned + " / " + ids.length;
     } else {
-      // 性格・加護は集めるものではないので、総数だけを出す
-      var all = (tab === "natures") ? data.natures : data.blessings;
-      text = (this.texts.totalLabel || "") + " " + Object.keys(all || {}).length;
+      // 性格は集めるものではないので、総数だけを出す
+      text = (this.texts.totalLabel || "") + " " + Object.keys(data.natures || {}).length;
     }
 
     this.panel.drawText(text, pos.x, pos.y,
@@ -710,14 +749,97 @@
     lines.push({ text: item.name, font: t.font, color: t.textColor });
 
     var category = ((data.categories || {}).item || {})[item.category];
-    if (category) lines.push({ text: category.name, color: category.color });
+    if (category) {
+      // 装備は「装備・武器」のように枠まで出す
+      var label = category.name;
+      if (item.equip) label += "・" + NS.EffectSystem.slotName(item, data);
+      lines.push({ text: label, color: category.color });
+    }
 
     lines.push({ text: "所持 " + this.game.inventory.getCount(item.id) });
     lines.push({ text: "" });
     this._pushWrapped(lines, item.description);
 
+    // 装備なら効果
+    if (item.equip) {
+      lines.push({ text: "" });
+      lines.push({ text: this.texts.effectLabel || "", color: t.cursorColor });
+      var effects = item.equip.effects || [];
+      for (var e = 0; e < effects.length; e++) {
+        var text = NS.EffectSystem.describeEffect(effects[e], data);
+        if (text) lines.push({ text: "・" + text });
+      }
+    }
+
+    // 誰が落とすか・どこで拾えるか
+    var sources = this._itemSources(item.id);
+    lines.push({ text: "" });
+    lines.push({ text: this.texts.sourceLabel || "", color: t.cursorColor });
+    if (sources.length === 0) {
+      lines.push({ text: "・" + (this.texts.sourceNone || ""), color: t.hintColor });
+    }
+    for (var s = 0; s < sources.length; s++) lines.push({ text: "・" + sources[s] });
+
     return { sprite: null, lines: lines };
   };
+
+  /**
+   * そのアイテムの出どころ（落とすモンスター・宝箱）を文にして返す。
+   *
+   * ★ まだ会っていないモンスターは名前を伏せる（???）。
+   *   図鑑に載っていない相手が「何を落とすか」で先に分かってしまうと、
+   *   出会いの楽しみが減る。会っていれば確率まで出す。
+   * 店・工房は出さない（そちらの画面で分かるので）。
+   */
+  DexScene.prototype._itemSources = function (itemId) {
+    var data = this.game.data;
+    var discovery = this.game.discovery;
+    var texts = this.texts;
+    var lines = [];
+    var id;
+
+    // 落とすモンスター（主も種族の drops に書いてある）
+    var monsters = data.monsters || {};
+    for (id in monsters) {
+      if (!Object.prototype.hasOwnProperty.call(monsters, id)) continue;
+      var drops = monsters[id].drops || [];
+      for (var i = 0; i < drops.length; i++) {
+        if (drops[i].item !== itemId) continue;
+        var seen = discovery.isMonsterSeen(id);
+        lines.push(fillText(texts.sourceDrop || "{name}  {rate}%", {
+          name: seen ? monsters[id].name : (texts.unknownName || "???"),
+          rate: seen ? Math.round((drops[i].rate || 0) * 100) : "?"
+        }));
+      }
+    }
+
+    // 宝箱。どこでも出る中身と、その場所だけの中身
+    var chest = ((data.features || {}).chest || {}).effect || {};
+    if (tableHas(chest.table, itemId)) lines.push(texts.sourceChest || "宝箱");
+
+    var dungeons = data.dungeons || {};
+    for (id in dungeons) {
+      if (!Object.prototype.hasOwnProperty.call(dungeons, id)) continue;
+      var tables = dungeons[id].featureTables || {};
+      if (tableHas(tables.chest, itemId)) {
+        lines.push(fillText(texts.sourceChestAt || "宝箱（{name}）", { name: dungeons[id].name }));
+      }
+    }
+    return lines;
+  };
+
+  function tableHas(table, itemId) {
+    for (var i = 0; i < (table || []).length; i++) {
+      if (table[i].item === itemId) return true;
+    }
+    return false;
+  }
+
+  function fillText(template, values) {
+    return (template || "").replace(/\{(\w+)\}/g, function (m, key) {
+      return (values[key] !== undefined) ? values[key] : m;
+    });
+  }
 
   /** 特性の詳細を行の配列にする */
   DexScene.prototype._buildAbilityDetail = function () {
@@ -828,6 +950,21 @@
       }
     }
 
+    // 状態異常をあたえる技。何をどれくらいの確率で入れるかを出す。
+    // 色は data/statuses.js のものを使う（戦闘中の印と同じ色）
+    if (skill.status) {
+      var status = data.getStatus ? data.getStatus(skill.status.id) : null;
+      if (status) {
+        var chance = (skill.status.chance === undefined) ? 1 : skill.status.chance;
+        lines.push({ text: "" });
+        lines.push({ text: (this.texts.statusLabel || "") + " " + status.name +
+                           "  " + Math.round(chance * 100) + "%",
+                     color: status.color || t.cursorColor });
+        // 通る確率は相手の耐性で下がる。数字だけ見て決められると誤解を招く
+        lines.push({ text: this.texts.statusNote || "", color: t.hintColor });
+      }
+    }
+
     lines.push({ text: "" });
     this._pushWrapped(lines, skill.description);
 
@@ -895,6 +1032,15 @@
     var t = this.theme;
     var lines = [];
 
+    // まだ買っていない加護は、名前も効果も出さない。
+    // 一覧で伏せておいて詳細で見えたら、伏せた意味がない
+    if (!this._isBlessingKnown(selected.value, blessing)) {
+      lines.push({ text: this.texts.unknownName || "???", font: t.font, color: t.textColor });
+      lines.push({ text: "" });
+      this._pushWrapped(lines, this.texts.blessingLockedNote);
+      return { sprite: null, lines: lines };
+    }
+
     lines.push({ text: blessing.name, font: t.font, color: t.textColor });
     lines.push({ text: "" });
     this._pushWrapped(lines, blessing.description);
@@ -948,8 +1094,11 @@
    * @param {object} categories 分類の定義
    * @param {string} categoryKey 定義の中で分類idを指すキー名
    * @param {function} makeEntry (id, definition) → 行の内容
+   * @param {object} [subgroups] 分類の中をさらに分けるとき（装備を武器・防具・アクセサリーに）
+   *   { keyOf: (id, definition) → 小分類id か null, defs: { id: { name, order, color } } }
+   *   小分類の見出しは分類の見出しより一段小さく（"武器" のように）出す
    */
-  function buildRows(definitions, categories, categoryKey, makeEntry) {
+  function buildRows(definitions, categories, categoryKey, makeEntry, subgroups) {
     var groups = {};
 
     for (var id in definitions) {
@@ -971,13 +1120,35 @@
       rows.push({ type: "header", label: "- " + category.name + " -", color: category.color });
 
       var ids = groups[ordered[i]];
+      if (subgroups) ids = sortBySubgroup(ids, definitions, subgroups);
+
+      var currentSub = null;
       for (var j = 0; j < ids.length; j++) {
+        var sub = subgroups ? subgroups.keyOf(ids[j], definitions[ids[j]]) : null;
+        if (sub && sub !== currentSub) {
+          var def = subgroups.defs[sub] || { name: sub };
+          rows.push({ type: "header", label: "  " + def.name, color: def.color || category.color });
+          currentSub = sub;
+        }
         var entry = makeEntry(ids[j], definitions[ids[j]]);
         entry.type = "entry";
         rows.push(entry);
       }
     }
     return rows;
+  }
+
+  /** 小分類の order 順に並べ替える（小分類の無いものは元の順のまま先頭） */
+  function sortBySubgroup(ids, definitions, subgroups) {
+    var indexed = ids.map(function (id, index) {
+      var sub = subgroups.keyOf(id, definitions[id]);
+      var order = (sub && subgroups.defs[sub]) ? subgroups.defs[sub].order : -1;
+      return { id: id, order: order, index: index };
+    });
+    indexed.sort(function (a, b) {
+      return (a.order - b.order) || (a.index - b.index);
+    });
+    return indexed.map(function (x) { return x.id; });
   }
 
   /**

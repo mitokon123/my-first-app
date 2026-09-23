@@ -214,6 +214,157 @@
       ]
     },
 
+    // --- タイトル画面のアイコン ---
+
+    // 新しく始める（芽。まだ何も無いところから始まる）
+    iconNewGame: {
+      palette: {
+        ".": null,
+        "K": "#1c2a1c",   // 輪郭
+        "G": "#5fd18c",   // 葉
+        "H": "#8ce8b0",   // 葉の光が当たる面
+        "S": "#6b5a3a"    // 茎の根もと
+      },
+      pixels: [
+        "................",
+        "................",
+        ".......KK.......",
+        "......KHHK......",
+        "..KK.KHGGK.KK...",
+        ".KHHKKHGGKKHHK..",
+        ".KHGGKKGGKKGGK..",
+        "..KGGKKGKKGGK...",
+        "...KKKKGKKKK....",
+        "......KGK.......",
+        "......KGK.......",
+        "......KSK.......",
+        ".....KKSKK......",
+        "....KSSSSSK.....",
+        ".....KKKKK......",
+        "................"
+      ]
+    },
+
+    // 続きから（しおりの挟まった本。図鑑の開いた本とは別物にしてある）
+    iconContinue: {
+      palette: {
+        ".": null,
+        "K": "#241d2e",   // 輪郭
+        "C": "#4a5a8c",   // 表紙
+        "H": "#6f86c9",   // 表紙の光が当たる面
+        "W": "#e8e0d0",   // 小口（紙）
+        "R": "#e8896a"    // しおり
+      },
+      pixels: [
+        "................",
+        "..KKKKKKKKKKK...",
+        ".KHHHHHHHHHHKK..",
+        ".KHCCCCCCCCHWK..",
+        ".KHCCCCCCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRRCCCHWK..",
+        ".KHCCCRKRCCHWK..",
+        ".KHCCCCCCCCHWK..",
+        ".KHHHHHHHHHHWK..",
+        "..KKKKKKKKKKK...",
+        "................"
+      ]
+    },
+
+    // パッチノート（巻いた書。バージョン表記の隣に置く）
+    iconPatchNote: {
+      palette: {
+        ".": null,
+        "K": "#2a2438",   // 輪郭
+        "W": "#ddd5c4",   // 紙
+        "H": "#f0e9db",   // 紙の光が当たる面
+        "L": "#7b86a4",   // 書かれた文字
+        "B": "#8c6a3a"    // 巻いた芯
+      },
+      pixels: [
+        "................",
+        "................",
+        "..KKKKKKKKKKKK..",
+        ".KBBKHHHHHHKBBK.",
+        ".KBBKHLLLLHKBBK.",
+        ".KBBKHHHHHHKBBK.",
+        ".KBBKWLLLLWKBBK.",
+        ".KBBKWWWWWWKBBK.",
+        ".KBBKWLLLLWKBBK.",
+        ".KBBKWWWWWWKBBK.",
+        ".KBBKWLLLWWKBBK.",
+        ".KBBKWWWWWWKBBK.",
+        ".KBBKWWWWWWKBBK.",
+        "..KKKKKKKKKKKK..",
+        "................",
+        "................"
+      ]
+    },
+
+    // セーブファイル（枠に番号札のついた石板）
+    iconSlot: {
+      palette: {
+        ".": null,
+        "K": "#20283a",   // 輪郭
+        "P": "#5b6a94",   // ふち（光の当たる面）
+        "A": "#2f3a55",   // 地
+        "W": "#c8d0e8"    // 刻まれた線
+      },
+      pixels: [
+        "................",
+        "..KKKKKKKKKKKK..",
+        ".KPPPPPPPPPPPPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAWWWWWWWWAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAWWWWWWAAAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAWWWWWWWWAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAWWWWWAAAAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPPPPPPPPPPPPK.",
+        "..KKKKKKKKKKKK..",
+        "................",
+        "................"
+      ]
+    },
+
+    // 遊び方（掲示された立て札の「?」）
+    //   図鑑（開いた本）と紛らわしくならないよう、
+    //   本の形は使わず、板に大きく「?」を彫った形にしてある
+    iconHelp: {
+      palette: {
+        ".": null,
+        "K": "#20283a",   // 輪郭
+        "P": "#5b6a94",   // 板のふち（光の当たる面）
+        "A": "#2f3a55",   // 板の地
+        "W": "#ffd75e"    // 彫られた「?」
+      },
+      pixels: [
+        "................",
+        "..KKKKKKKKKKKK..",
+        ".KPPPPPPPPPPPPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAAAWWWWAAAPK.",
+        ".KPAAWWAAWWAAPK.",
+        ".KPAAAAAAWWAAPK.",
+        ".KPAAAAAWWWAAPK.",
+        ".KPAAAAWWWAAAPK.",
+        ".KPAAAAWWAAAAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPAAAAWWAAAAPK.",
+        ".KPAAAAWWAAAAPK.",
+        ".KPAAAAAAAAAAPK.",
+        ".KPPPPPPPPPPPPK.",
+        "..KKKKKKKKKKKK.."
+      ]
+    },
+
     // セーブ（巻物）
     iconSave: {
       palette: {

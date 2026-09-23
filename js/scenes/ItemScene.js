@@ -52,9 +52,14 @@
     this._rebuildList();
   };
 
-  /** 持ち物から一覧の行を組み立てる（分類ごとに見出しを挟む） */
+  /**
+   * 持ち物から一覧の行を組み立てる（分類ごとに見出しを挟む）。
+   * 装備は「装備」の中で武器・防具・アクセサリーに分けて、小さい見出しを挟む
+   */
   ItemScene.prototype._rebuildList = function () {
     var inventory = this.game.inventory;
+    var data = this.game.data;
+    var slotDefs = (data.categories || {}).equipSlot || {};
     var rows = [];
 
     if (inventory) {
@@ -64,9 +69,18 @@
         rows.push({ type: "header", label: "- " + group.category.name + " -",
                     color: group.category.color });
 
-        for (var s = 0; s < group.slots.length; s++) {
-          var slot = group.slots[s];
-          var item = this.game.data.getItem(slot.itemId);
+        var slots = sortByEquipSlot(group.slots, data, slotDefs);
+        var currentSub = null;
+        for (var s = 0; s < slots.length; s++) {
+          var slot = slots[s];
+          var item = data.getItem(slot.itemId);
+
+          var sub = (item && item.equip) ? NS.EffectSystem.slotOf(item) : null;
+          if (sub && sub !== currentSub) {
+            rows.push({ type: "header", label: "  " + NS.EffectSystem.slotNameOf(sub, data),
+                        color: (slotDefs[sub] && slotDefs[sub].color) || group.category.color });
+            currentSub = sub;
+          }
           rows.push({
             type: "entry",
             label: item ? item.name : slot.itemId,
@@ -78,6 +92,18 @@
     }
     this.list.setRows(rows);
   };
+
+  /** 装備を枠の順（武器 → 防具 → アクセサリー）に並べ替える。装備でないものは元の順 */
+  function sortByEquipSlot(slots, data, slotDefs) {
+    var indexed = slots.map(function (slot, index) {
+      var item = data.getItem(slot.itemId);
+      var sub = (item && item.equip) ? NS.EffectSystem.slotOf(item) : null;
+      var order = (sub && slotDefs[sub]) ? slotDefs[sub].order : -1;
+      return { slot: slot, order: order, index: index };
+    });
+    indexed.sort(function (a, b) { return (a.order - b.order) || (a.index - b.index); });
+    return indexed.map(function (x) { return x.slot; });
+  }
 
   // --- 更新 ---
 
@@ -112,6 +138,7 @@
 
     if (!this.usage.isUsableIn(selected.value, this.useScene)) {
       this._showNotice(this.texts.cannotUse || "");
+      this.game.playError();
       return;
     }
 
@@ -135,10 +162,12 @@
 
     if (!result.success) {
       this._showNotice(this.texts.cannotUse || "");
+      this.game.playError();
       return;
     }
 
     if (escaping && this.onEscape) {
+      this.game.audio.playSe("escape");
       this.onEscape();
       return;   // 画面が切り替わるので、この先は何もしない
     }
@@ -172,14 +201,21 @@
     var result = this.usage.use(selected.value, target, this.game.inventory);
 
     if (result.success) {
-      var template = this.texts.used || "";
+      // 文は効果の種類ごとに違う（HP回復・PP回復・状態異常を治す）
+      var used = this.texts.used || {};
+      var template = used[result.effectType] || used.default || "";
       this._showNotice(template
         .replace("{name}", target.getName())
-        .replace("{amount}", result.amount));
+        .replace("{amount}", result.amount)
+        .replace("{item}", result.itemName));
+      // 回復の音（戦闘中と同じ。HP・PP・状態異常のどれでも）
+      this.game.audio.playSe("heal");
     } else if (result.reason === "noEffect") {
       this._showNotice(this.texts.noEffect || "");
+      this.game.playError();
     } else {
       this._showNotice(this.texts.cannotUse || "");
+      this.game.playError();
     }
 
     // 使って個数が変わるので一覧を作り直す
@@ -225,12 +261,10 @@
     this.panel.drawText(this.texts.title || "", title.x, title.y,
       { font: title.font, color: title.color });
 
-    // 使用中の枠数を副題の代わりに出す
+    // 持っている種類数を副題の代わりに出す（種類数に上限は無い）
     var text = this.texts.subtitle || "";
     if (inventory && this.texts.slotsLabel) {
-      text = this.texts.slotsLabel
-        .replace("{used}", inventory.slotCount())
-        .replace("{max}", inventory.maxSlots);
+      text = this.texts.slotsLabel.replace("{used}", inventory.slotCount());
     }
     this.panel.drawText(text, subtitle.x, subtitle.y,
       { font: subtitle.font, color: subtitle.color });

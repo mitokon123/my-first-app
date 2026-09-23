@@ -13,6 +13,7 @@
  *   pointer.x / y   … キャンバス座標
  *   pointer.moved   … このフレームで動いたか（動いたときだけ選択を追わせるため）
  *   pointer.clicked … このフレームで左ボタンを離したか
+ *   pointer.down    … 左ボタンを押している最中か（スクロールバーをつまんで動かすのに使う）
  *   pointer.right   … このフレームで右ボタンを押したか（取り消しに使う）
  *   pointer.wheel   … このフレームのホイールの回転量（下向きが正。1回転で±1）
  *   pointer.inside  … カーソルがキャンバスの上にあるか
@@ -40,7 +41,7 @@
 
     this.canvas = canvas || null;
     this.pointer = {
-      x: -1, y: -1, moved: false, clicked: false, right: false, wheel: 0, inside: false
+      x: -1, y: -1, moved: false, clicked: false, down: false, right: false, wheel: 0, inside: false
     };
     this._pointerBuffer = { moved: false, clicked: false, right: false, wheel: 0 };
 
@@ -79,12 +80,21 @@
     canvas.addEventListener("mousedown", function (e) {
       self._updatePointerPosition(e);
       if (e.button === 2) self._pointerBuffer.right = true;
+      if (e.button === 0) self.pointer.down = true;
     });
 
     // 「押して離す」で決定にする（押しっぱなしで連続決定しないように）
     canvas.addEventListener("mouseup", function (e) {
       self._updatePointerPosition(e);
-      if (e.button === 0) self._pointerBuffer.clicked = true;
+      if (e.button === 0) {
+        self._pointerBuffer.clicked = true;
+        self.pointer.down = false;
+      }
+    });
+
+    // 画面の外で離されると mouseup が来ないので、window でも見て押しっぱなしを解く
+    window.addEventListener("mouseup", function (e) {
+      if (e.button === 0) self.pointer.down = false;
     });
 
     // ホイール。回した量ではなく「何段回したか」に直して扱う
@@ -149,6 +159,20 @@
   Input.prototype.isPressed = function (action) {
     if (action === "cancel" && this.pointer.right) return true;
     return !!this._pressed[action];
+  };
+
+  /**
+   * このフレームで何か操作されたか（どのアクションでも、クリックでも）。
+   *
+   * 音を鳴らし始めてよいかの判断に使う。ブラウザは
+   * 「一度も触られていない画面」では音を鳴らさないため、
+   * その1回目を捕まえる必要がある。
+   */
+  Input.prototype.isAnyPressed = function () {
+    for (var action in this._pressed) {
+      if (this._pressed[action]) return true;
+    }
+    return !!(this.pointer && (this.pointer.clicked || this.pointer.right));
   };
 
   /** カーソルの位置（キャンバス座標） */

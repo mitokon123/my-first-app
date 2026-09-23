@@ -10,10 +10,29 @@
 
   /**
    * @param {object} messages data/messages.js の messages
+   * @param {object} [statuses] data/statuses.js。状態異常ごとの言い回しを読むのに使う。
+   *   渡さなければ、battle 側の既定文だけで動く
    */
-  function BattleMessageFormatter(messages) {
+  function BattleMessageFormatter(messages, statuses) {
     this.templates = (messages || {}).battle || {};
+    this.statuses = statuses || {};
   }
+
+  /**
+   * 状態異常ごとの言い回しを取り出す（無ければ null）。
+   * 「毒におかされている」のように、状態異常ごとに言い方を変えたいので、
+   * 文言は data/statuses.js の1件ずつに持たせてある。
+   */
+  BattleMessageFormatter.prototype._statusText = function (event, key) {
+    var def = this.statuses[event.statusId];
+    return (def && def[key]) || null;
+  };
+
+  /** 状態異常の文に埋める値。statuses.js と既定文のどちらでも使えるよう両方の名前を入れる */
+  BattleMessageFormatter.prototype._statusValues = function (event) {
+    var name = this._targetName(event);
+    return { name: name, target: name, status: event.statusName, amount: event.amount };
+  };
 
   /**
    * イベント配列を文字列配列へ変換する。
@@ -63,8 +82,6 @@
       // 呼び出し側が文章を組み立て済みのもの（道具・スカウトなど）
       case "custom":
         return event.text || null;
-      case "enterField":
-        return fill(t.enterField, { name: event.actorName });
       case "defend":
         return fill(t.defend, { actor: this._actorName(event) });
       case "wait":
@@ -100,6 +117,27 @@
       case "modifierEnd":
         return fill(t.modifierEnd,
                     { target: this._targetName(event), skill: event.skillName });
+
+      // 状態異常。言い回しは data/statuses.js に1件ずつ書いてあり、
+      // 書いていなければ battle 側の既定文で埋める。
+      // {name} と {target} はどちらも「敵の」付きの表示名。
+      // statuses.js 側では {name}、既定文では {target} と書き分けてあるだけで中身は同じ
+      case "status":
+        return fill(this._statusText(event, "message") || t.statusApplied,
+                    this._statusValues(event));
+      case "statusDamage":
+        return fill(this._statusText(event, "tickMessage") || t.statusDamage,
+                    this._statusValues(event));
+      case "statusEnd":
+        return fill(this._statusText(event, "cureMessage") || t.statusEnd,
+                    this._statusValues(event));
+      case "statusBlocked":
+        return fill(this._statusText(event, "blockMessage") || t.statusBlocked,
+                    this._statusValues(event));
+      case "statusMiss":
+        return fill(t.statusMiss, this._statusValues(event));
+      case "statusImmune":
+        return fill(t.statusImmune, this._statusValues(event));
       case "expGained":
         return fill(t.expGained, { amount: event.amount });
       case "levelUp":

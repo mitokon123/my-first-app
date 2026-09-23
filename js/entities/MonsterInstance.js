@@ -36,7 +36,7 @@
     this.skills = options.skills ||
       NS.MonsterData.skillsUpToLevel(this._species, level);
 
-    // 身につけている装備（data/items.js の id の配列）。上限は config.equipMax
+    // 身につけている装備（data/items.js の id の配列）。枠は config.equipSlots
     this.equipment = options.equipment || [];
     /**
      * 掛かっている状態異常（data/statuses.js）。
@@ -67,16 +67,19 @@
     this.modifiers = [];
 
     /**
-     * 「主として出ているあいだ」だけ掛かる補正（data/bosses.js の statMultiplier）。
+     * 「その戦いに敵として出ているあいだ」だけ掛かる補正。
      *
-     * ボスを強くするのに基礎値やレベルを上げると、
+     *   data/bosses.js の statMultiplier      … 主として立ちはだかるとき
+     *   data/dungeons.js の table の statMultiplier … 特殊な出方をする在来種
+     *
+     * 敵を強くするのに基礎値やレベルを上げると、
      * 仲間にしたときまで強くなったり、報酬が膨らんだりする。
      * 立ちはだかる相手としての強さは、ここで別に足す。
      *
      * 書き方は特性・装備と同じ effects の配列。EffectSystem がここも読む。
-     * スカウトで作り直した個体には引き継がれない（DungeonScene が敵にだけ付ける）。
+     * スカウトで作り直した個体には引き継がれない。
      */
-    this.bossEffects = [];
+    this.encounterEffects = [];
 
     /**
      * 決まった順番で行動させたいときの手順（data/bosses.js の actionPattern）。
@@ -118,20 +121,21 @@
   // --- 参照 ---
 
   /**
-   * 主としての補正を掛ける。
+   * その戦いのあいだだけ掛かる補正を設定する。
+   * 主（data/bosses.js）と、特殊な出方をする在来種（data/dungeons.js）の両方で使う。
    *
    * @param {object} multipliers { hp, attack, defense, speed, pp } の倍率。
    *   書かなかったステータスは等倍。null / 空を渡すと補正なしに戻る
    */
-  MonsterInstance.prototype.setBossMultipliers = function (multipliers) {
-    this.bossEffects = [];
+  MonsterInstance.prototype.setEncounterMultipliers = function (multipliers) {
+    this.encounterEffects = [];
 
     for (var stat in (multipliers || {})) {
       if (!Object.prototype.hasOwnProperty.call(multipliers, stat)) continue;
 
       var value = multipliers[stat];
       if (typeof value !== "number" || value === 1) continue;
-      this.bossEffects.push({ type: "statMultiplier", stat: stat, value: value });
+      this.encounterEffects.push({ type: "statMultiplier", stat: stat, value: value });
     }
 
     // 最大値が変わるので、満タンにし直す
@@ -264,10 +268,6 @@
     return null;
   };
 
-  MonsterInstance.prototype.hasStatus = function (statusId) {
-    return !!this.getStatus(statusId);
-  };
-
   /** 掛かっている状態異常の定義を、掛かった順に返す（画面が印を出すのに使う） */
   MonsterInstance.prototype.getStatusDefs = function () {
     var out = [];
@@ -336,7 +336,44 @@
   };
 
   /**
-   * 状態異常への耐性（-5〜10 想定。書かれていなければ 0）。
+   * ダンジョンを1歩進んだぶんの処理。
+   * walkDamage を書いた状態異常（いまは毒だけ）がHPを削る。
+   *
+   * ★ HPは leaveAtLeast より下げない。
+   *   戦闘の外で戦闘不能になる経路は、このゲームにまだ1つも無い
+   *   （罠も leaveAtLeast: 1 で必ず1残す）。毒だけ例外にはしない。
+   *
+   * ★ 歩数は状態異常ごとに数える（entry.steps）。
+   *   途中で毒が治って掛け直されたら、数えも0からになる。
+   *
+   * @returns {Array<{def:object, amount:number}>} 実際に削れたもの
+   */
+  MonsterInstance.prototype.walkStep = function () {
+    var result = [];
+    if (this.isFainted()) return result;   // 倒れている仲間はこれ以上削らない
+
+    for (var i = 0; i < this.statusEffects.length; i++) {
+      var entry = this.statusEffects[i];
+      var def = this._data.getStatus ? this._data.getStatus(entry.id) : null;
+      var walk = def && def.walkDamage;
+      if (!walk) continue;
+
+      entry.steps = (entry.steps || 0) + 1;
+      if (entry.steps < (walk.everySteps || 1)) continue;
+      entry.steps = 0;
+
+      var floor = (walk.leaveAtLeast === undefined) ? 1 : walk.leaveAtLeast;
+      var amount = Math.min(walk.amount || 1, Math.max(0, this.currentHp - floor));
+      if (amount <= 0) continue;
+
+      this.currentHp -= amount;
+      result.push({ def: def, amount: amount });
+    }
+    return result;
+  };
+
+  /**
+   * 状態異常への耐性（装備込み。-5〜10 に収まる。書かれていなければ 0）。
    *
    * 属性耐性とまったく同じ形にしてある。種族の statusResist に書き、
    * 装備で足すときも属性と同じ resistBonus を使う。
@@ -349,12 +386,17 @@
     var value = resists[statusId];
     var base = (value === undefined) ? 0 : value;
 
+    // 装備などで耐性そのものを底上げできる（毒よけの護符など）。
+    // "status" を渡さないと属性耐性として引かれてしまうので注意
     var effects = this._getEffects();
-    return effects ? (base + effects.getResistBonus(this, statusId)) : base;
+    var total = effects ? (base + effects.getResistBonus(this, statusId, "status")) : base;
+    return this._clampResist(total);
   };
 
   /**
-   * 主として出ているあいだだけ効かない状態異常を決める（data/bosses.js の immuneToStatus）。
+   * 主として出ているあいだだけ効かない状態異常を決める。
+   * 渡すのは DungeonScene._bossImmunities（data/battle.js の bossImmuneToStatus
+   * ＋ その主だけの data/bosses.js の immuneToStatus）。
    *
    * 種族そのものに書かず、ここで別に持つのは statMultiplier と同じ理由。
    * 仲間に迎えたときは、その種族そのままの耐性に戻る。
@@ -383,16 +425,6 @@
   MonsterInstance.prototype.getName = function () {
     var base = this.nickname || (this._species ? this._species.name : this.speciesId);
     return this.displaySuffix ? (base + this.displaySuffix) : base;
-  };
-
-  /** 種族としての名前（名前をつけていても変わらない。図鑑などで使う） */
-  MonsterInstance.prototype.getSpeciesName = function () {
-    return this._species ? this._species.name : this.speciesId;
-  };
-
-  /** 名前をつけているか */
-  MonsterInstance.prototype.hasNickname = function () {
-    return !!this.nickname;
   };
 
   /**
@@ -485,7 +517,7 @@
   };
 
   /**
-   * 指定属性に対する耐性（-5〜10 想定。書かれていなければ 0）。
+   * 指定属性に対する耐性（装備込み。-5〜10 に収まる。書かれていなければ 0）。
    * @param {string} elementId
    */
   MonsterInstance.prototype.getResistance = function (elementId) {
@@ -495,7 +527,8 @@
 
     // 装備などで耐性そのものを底上げできる（炎よけの札など）
     var effects = this._getEffects();
-    return effects ? (base + effects.getResistBonus(this, elementId)) : base;
+    var total = effects ? (base + effects.getResistBonus(this, elementId)) : base;
+    return this._clampResist(total);
   };
 
   /**
@@ -552,6 +585,24 @@
     var min = numberOr(growth.minGrowthRate, rate);
     var max = numberOr(growth.maxGrowthRate, rate);
     return Math.max(min, Math.min(max, rate));
+  };
+
+  /**
+   * 耐性の合計を、決められた範囲（data/battle.js の resistance）に収める。
+   *
+   * 属性・状態異常のどちらもここを通す。上限は immuneAt と同じ値なので、
+   * 「完全無効より上」は作れない。装備を重ねても無駄が出るだけで壊れない。
+   *
+   * @param {number} value 種族の値＋装備などの合計
+   */
+  MonsterInstance.prototype._clampResist = function (value) {
+    var config = ((this._data.battle || {}).resistance) || {};
+    var max = (config.maxValue === undefined) ? config.immuneAt : config.maxValue;
+    var min = config.minValue;
+
+    if (max !== undefined && value > max) return max;
+    if (min !== undefined && value < min) return min;
+    return value;
   };
 
   /** 効果（特性・装備）の集計係。必要になったときだけ作る */
@@ -663,15 +714,6 @@
     return true;
   };
 
-  MonsterInstance.prototype.restorePp = function (amount) {
-    this.currentPp = Math.min(this.getMaxPp(), this.currentPp + (amount || 0));
-    return this.currentPp;
-  };
-
-  MonsterInstance.prototype.restorePpFull = function () {
-    this.currentPp = this.getMaxPp();
-  };
-
   // --- HP 操作 ---
 
   MonsterInstance.prototype.isFainted = function () { return this.currentHp <= 0; };
@@ -778,7 +820,13 @@
       ivs: { hp: this.ivs.hp, attack: this.ivs.attack,
              defense: this.ivs.defense, speed: this.ivs.speed || 0 },
       skills: this.skills.slice(),
-      equipment: (this.equipment || []).slice()
+      equipment: (this.equipment || []).slice(),
+      // 状態異常。ふつうは拠点へ帰った時点で空になるが、
+      // 毒（persists）はダンジョンの途中でセーブすると残ったままになる。
+      // これを保存しないと、セーブして再開するだけで毒が消せてしまう
+      statusEffects: this.statusEffects.map(function (entry) {
+        return { id: entry.id, remaining: entry.remaining, steps: entry.steps || 0 };
+      })
     };
   };
 
@@ -832,6 +880,18 @@
     instance.currentPp = (saved.currentPp === undefined)
       ? instance.getMaxPp()
       : Math.max(0, Math.min(instance.getMaxPp(), saved.currentPp));
+
+    // 状態異常。定義が消えたものは読み飛ばす（データを変更しても安全に読めるように）
+    instance.statusEffects = [];
+    var savedStatuses = saved.statusEffects || [];
+    for (var u = 0; u < savedStatuses.length; u++) {
+      if (!gameData.getStatus || !gameData.getStatus(savedStatuses[u].id)) continue;
+      instance.statusEffects.push({
+        id: savedStatuses[u].id,
+        remaining: savedStatuses[u].remaining,
+        steps: savedStatuses[u].steps || 0
+      });
+    }
     return instance;
   };
 

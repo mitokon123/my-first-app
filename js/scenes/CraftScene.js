@@ -42,6 +42,9 @@
   }
 
   CraftScene.prototype.enter = function () {
+    // 工房の曲。拠点へ戻ると拠点の曲に戻る（HomeScene.enter）
+    this.game.audio.playBgm("craft");
+
     this.phase = "list";
     this.notice.clear();
     this._rebuildList();
@@ -49,24 +52,64 @@
 
   // --- 一覧の組み立て ---
 
+  /**
+   * 作れるものの一覧。できあがるものの分類（回復 → 装備 → …）で見出しを挟み、
+   * 装備はさらに武器・防具・アクセサリーで分ける（持ち物・図鑑と同じ見せ方）。
+   * 同じ見出しの中では data/recipes.js の order の順。
+   */
   CraftScene.prototype._rebuildList = function () {
     var recipes = this.craftSystem.getRecipes(this.game.clearedDungeons);
+    var data = this.game.data;
     var t = this.theme;
-    var rows = [];
+    var categories = (data.categories || {}).item || {};
+    var slotDefs = (data.categories || {}).equipSlot || {};
 
+    // 見出しごとにまとめる（分類 → 装備の枠）
+    var groups = {};
     for (var i = 0; i < recipes.length; i++) {
-      var item = this.game.data.getItem(recipes[i].result.item);
-      var ready = this.craftSystem.canCraft(this.game, recipes[i]).ok;
+      var item = data.getItem(recipes[i].result.item);
+      if (!item) continue;
+      var categoryId = item.category || "other";
+      var slot = item.equip ? NS.EffectSystem.slotOf(item) : null;
+      var key = categoryId + (slot ? "/" + slot : "");
+      if (!groups[key]) {
+        groups[key] = { categoryId: categoryId, slot: slot, entries: [],
+          order: ((categories[categoryId] || {}).order || 999) * 10
+               + ((slot && slotDefs[slot]) ? slotDefs[slot].order : 0) };
+      }
+      groups[key].entries.push({ recipe: recipes[i], item: item });
+    }
 
-      rows.push({
-        type: "entry",
-        label: item.name,
-        // 費用が要るレシピだけ右側に金額を出す
-        right: (recipes[i].gold || 0) > 0 ? (recipes[i].gold + "G") : "",
-        // 作れないものは薄く表示する
-        color: ready ? t.textColor : t.hintColor,
-        value: recipes[i]
-      });
+    var ordered = Object.keys(groups).sort(function (a, b) { return groups[a].order - groups[b].order; });
+    var rows = [];
+    var lastCategory = null;
+
+    for (var g = 0; g < ordered.length; g++) {
+      var group = groups[ordered[g]];
+      var category = categories[group.categoryId] || { name: group.categoryId };
+
+      if (group.categoryId !== lastCategory) {
+        rows.push({ type: "header", label: "- " + category.name + " -", color: category.color });
+        lastCategory = group.categoryId;
+      }
+      if (group.slot) {
+        rows.push({ type: "header", label: "  " + NS.EffectSystem.slotNameOf(group.slot, data),
+                    color: (slotDefs[group.slot] && slotDefs[group.slot].color) || category.color });
+      }
+
+      for (var e = 0; e < group.entries.length; e++) {
+        var recipe = group.entries[e].recipe;
+        var ready = this.craftSystem.canCraft(this.game, recipe).ok;
+        rows.push({
+          type: "entry",
+          label: group.entries[e].item.name,
+          // 費用が要るレシピだけ右側に金額を出す
+          right: (recipe.gold || 0) > 0 ? (recipe.gold + "G") : "",
+          // 作れないものは薄く表示する
+          color: ready ? t.textColor : t.hintColor,
+          value: recipe
+        });
+      }
     }
     this.list.setRows(rows);
   };
@@ -111,6 +154,7 @@
     var check = this.craftSystem.canCraft(this.game, recipe);
     if (!check.ok) {
       this._showNotice(this.texts[check.reason] || check.reason);
+      this.game.playError();
       return;
     }
 
@@ -142,13 +186,15 @@
     this._showNotice(result.success
       ? fill(this.texts.crafted, { name: item.name, count: result.count })
       : (this.texts[result.reason] || result.reason));
+    if (result.success) this.game.audio.playSe("itemGet");
+    else this.game.playError();
 
     this.phase = "list";
 
     // 素材と所持金が変わるので一覧を作り直す（カーソル位置は保つ）
     var index = this.list.index;
     this._rebuildList();
-    if (index < this.list.rows.length) this.list.index = index;
+    if (index < this.list.rows.length) this.list.setIndex(index);
   };
 
   CraftScene.prototype._showNotice = function (text) {
@@ -256,12 +302,13 @@
       y += lh;
     }
 
-    // 装備なら効果も出す
+    // 装備なら枠と効果も出す
     if (!item.equip) return;
 
     y += 6;
-    this.panel.drawText(this.texts.effectLabel || "", origin.x, y,
-      { font: t.smallFont, color: t.cursorColor });
+    this.panel.drawText((this.texts.effectLabel || "")
+        + "（" + NS.EffectSystem.slotName(item, this.game.data) + "）",
+      origin.x, y, { font: t.smallFont, color: t.cursorColor });
     y += lh;
 
     var effects = item.equip.effects || [];

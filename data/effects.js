@@ -12,6 +12,10 @@
  * shape    : どんな形で描くか（描き方は js/ui/SkillEffect.js が持つ）
  * duration : 出てから消えるまでの時間（ms）
  * glow     : にじみの強さ。暗い背景で色が沈まないようにする。0で無し
+ * hitSe    : この型で当たったときの音（data/audio.js の se のid）。
+ *            書かなければ hit（打撃音）。斬る型だけ slash（斬撃音）にしてある。
+ *            通常攻撃は種族の attackEffect（data/monsters.js）で型が決まるので、
+ *            爪や翼で斬る種族は自然と斬撃音になる
  * 残りの項目は shape ごとに意味が変わる（下のコメントを参照）
  *
  * 色は指定しない。使う技の属性から決まる。
@@ -68,6 +72,7 @@
        */
       slash: {
         shape: "slash",
+        hitSe: "slash",
         duration: 460,
         glow: 10,
         streaks: 3,
@@ -101,6 +106,29 @@
         duration: 440,
         glow: 18,
         radius: 76,
+        alpha: 0.55
+      },
+
+      /**
+       * 光芒。閃光の一段上（シャインなど、属性の基本技より強い技に）。
+       * 大きく閃いたあと、光の筋が四方へ伸び、輪が外へ抜け、少し遅れてもう一度光る。
+       *   radius     … 最初の閃きの大きさ（flash の 76 より大きい）
+       *   rays / rayLength / rayWidth … 筋の本数・長さ・太さ（1本おきに短くなる）
+       *   ringRadius / ringWidth      … 外へ抜ける輪
+       *   alpha      … 閃きの濃さ。flash と同じく上げすぎると相手が見えなくなる
+       * ★ さらに上の技を作るときは、この数値を上げるより新しい型を足すほうがよい
+       *   （「最終奥義」に見せるための型はまだ無い）
+       */
+      radiance: {
+        shape: "radiance",
+        duration: 640,
+        glow: 22,
+        radius: 96,
+        rays: 8,
+        rayLength: 126,
+        rayWidth: 5,
+        ringRadius: 136,
+        ringWidth: 4,
         alpha: 0.55
       },
 

@@ -43,11 +43,6 @@
     return result;
   };
 
-  /** まだ開いていない店も含めた全部（案内を出すときに使う） */
-  ShopSystem.prototype.getAllShops = function () {
-    return (this.config.shops || []).slice();
-  };
-
   ShopSystem.prototype._isOpen = function (shop, cleared) {
     if (!shop) return false;
     if (!shop.unlockedBy) return true;
@@ -159,7 +154,9 @@
 
   /**
    * 一度に買える最大数を返す。
-   * 「所持金」と「持ち物の空き」の小さいほうまで。
+   * 「所持金」と「その品をあと何個持てるか（maxStack）」の小さいほうまで。
+   *
+   * ★ 持ち物の種類数には上限が無いので、「枠が空いていないから買えない」は起きない。
    *
    * @param {MyGame.Game} game
    * @param {object} item items.js のエントリ
@@ -172,10 +169,9 @@
     var affordable = Math.floor(game.gold / price);
     if (affordable <= 0) return 0;
 
-    // 持ち物の空き（まだ1つも持っていない場合は、枠が空いているかも見る）
+    // その品をあと何個持てるか
     var maxStack = (item.maxStack === undefined) ? 99 : item.maxStack;
     var owned = game.inventory.getCount(item.id);
-    if (owned <= 0 && game.inventory.isFull()) return 0;
 
     return Math.max(0, Math.min(affordable, maxStack - owned));
   };
@@ -189,7 +185,7 @@
    * @param {number} price 1個あたりの買値
    * @param {number} [count] 買う個数（省略で1個）
    * @returns {{success:boolean, reason:string, count:number, gold:number}}
-   *   reason: "bought" | "notEnoughGold" | "inventoryFull" | "unknown"
+   *   reason: "bought" | "notEnoughGold" | "stackFull" | "unknown"
    */
   ShopSystem.prototype.buy = function (game, itemId, price, count) {
     var item = this.data.getItem(itemId);
@@ -198,9 +194,10 @@
     count = (count === undefined) ? 1 : Math.max(1, count);
     if (!game.canAfford(price * count)) return fail("notEnoughGold");
 
-    // 先に持ち物へ入れてみる（入らないのに払ってしまわないように）
+    // 先に持ち物へ入れてみる（入らないのに払ってしまわないように）。
+    // 入らないのは、その品を持てる数（maxStack）に達しているときだけ
     var added = game.giveItem(itemId, count);
-    if (added <= 0) return fail("inventoryFull");
+    if (added <= 0) return fail("stackFull");
 
     var total = price * added;
     game.spendGold(total);

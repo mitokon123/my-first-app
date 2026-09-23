@@ -22,6 +22,7 @@
    *   gold     : その挑戦で得たゴールド
    *   items    : [{ itemId, count }] 手に入れたもの
    *   lostItems: [{ itemId, count }] 失ったもの（全滅時のみ）
+   *   saved    : この時点で自動セーブしたか（はじめてクリアしたときだけ true）
    */
   function ResultScene(game, summary) {
     this.game = game;
@@ -139,6 +140,17 @@
 
     this.panel.drawText(this._placeText(), subtitle.x, subtitle.y,
       { align: subtitle.align, font: subtitle.font, color: subtitle.color });
+
+    // はじめてクリアしたときは自動でセーブされている。
+    // 手動セーブのゲームなので、黙って書き換えると気づけない
+    if (this.summary.saved && this.texts.savedNote) {
+      var note = L.savedNote || {};
+      this.panel.drawText(this.texts.savedNote,
+        note.x !== undefined ? note.x : subtitle.x,
+        note.y !== undefined ? note.y : subtitle.y + 22,
+        { align: note.align || subtitle.align, font: note.font || subtitle.font,
+          color: note.color || this.theme.cursorColor });
+    }
   };
 
   /** 「苔むす坑道 B3F まで」 */

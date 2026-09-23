@@ -36,6 +36,42 @@
     },
 
     /**
+     * 状態異常を治す。
+     *
+     * どれを治すかは data/items.js の effect が決める。
+     *   statuses: ["poison"] … 書いた状態異常だけを治す
+     *   statuses を省略      … curable: true のものを全部治す（万能薬を作るとき）
+     *
+     * 治せる状態異常が1つも掛かっていなければ「効果が無かった」となり、
+     * 持ち物も減らない（満タンに回復薬を使ったときと同じ扱い）。
+     *
+     * @returns amount は治した数
+     */
+    cureStatus: function (effect, target, gameData) {
+      if (!target || !target.getStatusDefs) return { applied: false, amount: 0 };
+
+      var defs = target.getStatusDefs();
+      var only = effect.statuses || null;
+      var cured = 0;
+
+      // 治しながら配列が縮むので、先に「治すもの」を決めてから外す
+      var ids = [];
+      for (var i = 0; i < defs.length; i++) {
+        if (only) {
+          if (only.indexOf(defs[i].id) < 0) continue;
+        } else if (!defs[i].curable) {
+          continue;   // 封印・即死のように治せないものは対象にしない
+        }
+        ids.push(defs[i].id);
+      }
+
+      for (var j = 0; j < ids.length; j++) {
+        if (target.removeStatus(ids[j])) cured++;
+      }
+      return { applied: cured > 0, amount: cured };
+    },
+
+    /**
      * その場から拠点へ帰る。
      * ここでは「使えた」と返すだけで、実際に帰るのは画面側が行う
      * （ItemUsage は場面を知らないままにしておく）。
@@ -84,32 +120,39 @@
    * @param {string} itemId
    * @param {object} target 効果の対象（MonsterInstance互換）
    * @param {MyGame.Inventory} inventory
-   * @returns {{success:boolean, reason:string, amount:number, itemName:string}}
+   * @returns {{success:boolean, reason:string, amount:number, itemName:string,
+   *            effectType:string}}
    *   reason: "used" | "noItem" | "noEffect" | "unknown"
+   *   effectType … 効果の種類。画面側が「HPが回復した」「毒が抜けた」を出し分けるのに使う
    */
   ItemUsage.prototype.use = function (itemId, target, inventory) {
     var item = this.data.getItem(itemId);
     var itemName = item ? item.name : itemId;
+    var type = (item && item.effect) ? item.effect.type : null;
 
-    if (!item || !item.effect) {
-      return { success: false, reason: "unknown", amount: 0, itemName: itemName };
-    }
-    if (inventory && !inventory.has(itemId, 1)) {
-      return { success: false, reason: "noItem", amount: 0, itemName: itemName };
-    }
-
-    var handler = EFFECT_HANDLERS[item.effect.type];
-    if (!handler) {
-      return { success: false, reason: "unknown", amount: 0, itemName: itemName };
+    function fail(reason) {
+      return { success: false, reason: reason, amount: 0,
+               itemName: itemName, effectType: type };
     }
 
-    var result = handler(item.effect, target);
-    if (!result.applied) {
-      return { success: false, reason: "noEffect", amount: 0, itemName: itemName };
-    }
+    if (!item || !item.effect) return fail("unknown");
+    if (inventory && !inventory.has(itemId, 1)) return fail("noItem");
+
+    var handler = EFFECT_HANDLERS[type];
+    if (!handler) return fail("unknown");
+
+    // 状態異常の定義を引く必要がある効果もあるので、データも渡す
+    var result = handler(item.effect, target, this.data);
+    if (!result.applied) return fail("noEffect");
 
     if (inventory) inventory.remove(itemId, 1);
-    return { success: true, reason: "used", amount: result.amount, itemName: itemName };
+    return { success: true, reason: "used", amount: result.amount,
+             itemName: itemName, effectType: type };
+  };
+
+  /** その効果はHPを回復するものか（画面側が回復の演出を出すかの判断に使う） */
+  ItemUsage.healsHp = function (effectType) {
+    return effectType === "healHp";
   };
 
   NS.ItemUsage = ItemUsage;

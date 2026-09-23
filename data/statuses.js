@@ -14,8 +14,12 @@
  *
  * ▼ 1件の中身
  *   name        : 表示名
- *   short       : 戦闘中の印に出す1文字
+ *   short       : 印に出す1文字（絵が無いときの代わり）
+ *   icon        : 16×16 の絵（data/sprites_icons.js）。戦闘・探索・仲間画面の印はこれで出す
  *   color       : 印の色
+ *   se          : 効果音のid（data/audio.js の se）。戦闘中に掛かった瞬間と、
+ *                 ターン終了時のダメージ（毒）で鳴る。書かなければ無音。
+ *                 ダンジョンを歩いているときの毒ダメージでは鳴らない
  *   duration    : { min, max } 自然に解ける残りターン数。書かなければ自然には解けない
  *   persists    : true なら戦闘が終わっても残る（毒だけ）
  *   curable     : 道具で治せるか
@@ -55,17 +59,25 @@
       id: "poison",
       name: "毒",
       short: "毒",
+      icon: "iconStatusPoison",
       color: "#7fd06a",
+      se: "statusPoison",
       persists: true,
       curable: true,
       // 戦闘中：ターン終了時に最大HPの1/8。ただし上限あり
       //   上限は「最大HPが大きい相手ほど毒が強くなりすぎる」のを止めるためのもの。
-      //   最大HP400で50に達するので、いまのモンスターでは深淵の王(370→46)だけが近い
+      //   最大HP400で50に達する。いまの主では深淵の王(371→46)と沼の主(505→50)がここ。
+      //
+      // ★ 毒は主（ボス）の共通の無効リスト（data/battle.js）には入れていないが、
+      //   いまの主4体は data/bosses.js の immuneToStatus で個別に無効にしてある。
+      //   HPが111〜505なので、毒が入るだけで1ターンあたり10%以上削れてしまうため。
+      //   HPが4桁まで伸びる相手（上限50なら5%以下）が出てきたら、そこでは書かなくてよい。
+      //   ★ max を上げるときは、主4体の戦いが毒1つで別物にならないか必ず測ること
       turnDamage: { hpRatio: 0.125, max: 50, leaveAtLeast: 0 },
       // ダンジョン：5歩ごとに1、HPは1で止まる
       walkDamage: { everySteps: 5, amount: 1, leaveAtLeast: 1 },
-      message: "{name} は毒におかされている！",
-      tickMessage: "{name} は毒のダメージを受けた！",
+      message: "{name} は毒に浸された",
+      tickMessage: "{name} は毒のダメージを受けた",
       cureMessage: "{name} の毒が消えた。"
     },
 
@@ -79,12 +91,14 @@
       id: "paralysis",
       name: "麻痺",
       short: "痺",
+      icon: "iconStatusParalysis",
       color: "#ffd75e",
+      se: "statusParalysis",
       duration: { min: 3, max: 5 },
       curable: true,
       blocksTurn: 0.5,
-      message: "{name} はしびれて動けなくなった！",
-      blockMessage: "{name} はしびれて動けない！",
+      message: "{name} はしびれて動けなくなった",
+      blockMessage: "{name} は身体が痺れている",
       cureMessage: "{name} のしびれが取れた。"
     },
 
@@ -96,13 +110,15 @@
       id: "sleep",
       name: "眠り",
       short: "眠",
+      icon: "iconStatusSleep",
       color: "#a88ce0",
+      se: "statusSleep",
       duration: { min: 2, max: 4 },
       curable: true,
       blocksTurn: "always",
       wakeOnDamage: 0.5,
-      message: "{name} は眠ってしまった！",
-      blockMessage: "{name} は眠っている。",
+      message: "{name} は眠ってしまった",
+      blockMessage: "{name} は眠っている",
       cureMessage: "{name} は目を覚ました。"
     },
 
@@ -118,12 +134,14 @@
       id: "seal",
       name: "封印",
       short: "封",
+      icon: "iconStatusSeal",
       color: "#8a5fb0",
+      se: "statusSeal",
       duration: { min: 2, max: 5 },
       curable: false,
       blocksSkills: true,
-      message: "{name} は技を封じられた！",
-      blockMessage: "{name} は技が使えない！",
+      message: "{name} は技をだせなくなった",
+      blockMessage: "{name} は技が使えない",
       cureMessage: "{name} の封印が解けた。"
     },
 
@@ -138,11 +156,13 @@
       id: "blind",
       name: "盲目",
       short: "盲",
+      icon: "iconStatusBlind",
       color: "#5e5650",
+      se: "statusBlind",
       duration: { min: 2, max: 4 },
       curable: true,
       accuracyMul: 0.65,
-      message: "{name} は目が見えなくなった！",
+      message: "{name} は視界が遮られた",
       cureMessage: "{name} の目が見えるようになった。"
     },
 
@@ -157,18 +177,20 @@
       id: "curse",
       name: "呪い",
       short: "呪",
+      icon: "iconStatusCurse",
       color: "#c04a7a",
+      se: "statusCurse",
       duration: { min: 3, max: 5 },
       curable: true,
       effects: [{ type: "damageTaken", value: 1.3 }],
-      message: "{name} は呪われた！",
+      message: "{name} は呪われてしまった",
       cureMessage: "{name} の呪いが解けた。"
     },
 
     /**
      * 即死。当たった時点で戦闘不能。
      *
-     * ★ 主（ボス）には効かない。data/bosses.js に immuneToStatus で書く。
+     * ★ 主（ボス）には効かない。data/battle.js の bossImmuneToStatus（全ボス共通）。
      *
      * ★ 最後の1体でも容赦なく効く（守りは入れていない）。
      *   最後の味方に通れば、そこで挑戦が終わる。
@@ -182,10 +204,14 @@
       id: "instantDeath",
       name: "即死",
       short: "死",
+      icon: "iconStatusInstantDeath",
       color: "#e8542a",
+      // この音が「倒れる」音を兼ねる（直後の faint の音は鳴らさない）
+      se: "statusInstantDeath",
       curable: false,
       instantKill: true,
-      message: "{name} は力尽きた！"
+      // 受けた瞬間にHP0なので「掛かった」ではなく「死んだ」と言い切る。直後に倒れた文も続く
+      message: "{name} は死んでしまった"
     }
   };
 })(window.MyGame);

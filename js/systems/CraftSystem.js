@@ -67,7 +67,7 @@
   /**
    * 作れるか。
    * @returns {{ok:boolean, reason:string}}
-   *   reason: "ok" | "notEnoughMaterial" | "notEnoughGold" | "inventoryFull" | "unknown"
+   *   reason: "ok" | "notEnoughMaterial" | "notEnoughGold" | "stackFull" | "unknown"
    */
   CraftSystem.prototype.canCraft = function (game, recipe) {
     if (!recipe || !recipe.result) return { ok: false, reason: "unknown" };
@@ -79,16 +79,17 @@
 
     if (!game.canAfford(recipe.gold || 0)) return { ok: false, reason: "notEnoughGold" };
 
-    // 素材を消したあとの空きで判断する（素材の枠が空くこともあるため）
     if (!this._hasRoomForResult(game, recipe)) {
-      return { ok: false, reason: "inventoryFull" };
+      return { ok: false, reason: "stackFull" };
     }
     return { ok: true, reason: "ok" };
   };
 
   /**
    * 作ったものを持ち物へ入れられるか。
-   * 「素材を使い切って枠が空く」場合も入れられる扱いにする。
+   *
+   * 持ち物の種類数に上限は無いので、見るのは
+   * 「その品を持てる数（data/items.js の maxStack）」だけ。
    */
   CraftSystem.prototype._hasRoomForResult = function (game, recipe) {
     var resultItem = this.data.getItem(recipe.result.item);
@@ -97,19 +98,7 @@
     var owned = game.inventory.getCount(resultItem.id);
     var maxStack = (resultItem.maxStack === undefined) ? 99 : resultItem.maxStack;
 
-    // 所持上限を超えるなら作れない
-    if (owned + (recipe.result.count || 1) > maxStack) return false;
-
-    // 既に持っているものなら、新しい枠は要らない
-    if (owned > 0) return true;
-    if (!game.inventory.isFull()) return true;
-
-    // 枠が埋まっている場合でも、使い切る素材があれば1枠空く
-    var status = this.getMaterialStatus(game, recipe);
-    for (var i = 0; i < status.length; i++) {
-      if (status[i].owned === status[i].need) return true;
-    }
-    return false;
+    return owned + (recipe.result.count || 1) <= maxStack;
   };
 
   /**

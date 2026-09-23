@@ -12,6 +12,10 @@
     // 読み込み専用の DataLoader から参照窓口 GameData を作る
     var gameData = NS.DataLoader.build(NS.rawData);
 
+    // 主人公の服の色ちがいを先に作っておく。
+    // ★ 絵を組み立てる前に呼ぶこと。あとから足しても描画物が作られない
+    if (NS.PlayerLook) NS.PlayerLook.buildVariants(gameData);
+
     // スプライト（コード生成のドット絵など）を用意
     var assets = new NS.AssetLoader();
     assets.build(gameData.sprites);

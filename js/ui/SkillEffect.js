@@ -147,6 +147,78 @@
       ctx.fill();
     },
 
+    /**
+     * 光芒：閃光の一段上。大きく閃いたあと、光の筋が四方へ伸び、輪が外へ抜ける。
+     *
+     * 閃光（flash）と同じ「最初から薄れる」考え方だが、
+     *   ・筋が伸びる（0〜0.7）
+     *   ・輪が広がる（0.15〜1）
+     *   ・少し遅れてもう一度小さく光る（0.35〜0.65）
+     * の3つを重ねて「一発で終わらない」重さを出す。大技の中間くらいの見せ方。
+     *   radius / rays / rayLength / ringRadius / alpha は data/effects.js
+     */
+    radiance: function (ctx, d, t, p) {
+      var radius = d.radius || 90;
+      var alpha = (d.alpha === undefined) ? 0.5 : d.alpha;
+
+      // 1. 最初の閃き（flash より大きく、少しだけ長く残す）
+      var decay = (1 - t) * (1 - t);
+      setAlpha(ctx, decay * alpha);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius * easeOut(Math.min(1, t * 1.4)), 0, Math.PI * 2);
+      ctx.fill();
+
+      setAlpha(ctx, Math.max(0, 1 - t * 2.5));
+      ctx.fillStyle = p.coreColor;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, radius * 0.38 * (1 - t * 0.5), 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. 光の筋。ゆっくり回りながら伸び、細くなって消える
+      var rays = d.rays || 8;
+      var length = d.rayLength || 120;
+      var raySub = span(t, 0, 0.7);
+      if (raySub > 0) {
+        ctx.lineCap = "round";
+        for (var i = 0; i < rays; i++) {
+          var angle = turns(i / rays + p.phase + t * 0.04);
+          // 1本おきに長さを変えて、単調な放射に見せない
+          var scale = (i % 2 === 0) ? 1 : 0.62;
+          var reach = length * scale * easeOut(raySub);
+          setAlpha(ctx, fadeOut(raySub) * 0.9);
+          ctx.strokeStyle = (raySub < 0.25) ? p.coreColor : p.color;
+          ctx.lineWidth = Math.max(1, (d.rayWidth || 5) * (1 - raySub * 0.7));
+          ctx.beginPath();
+          ctx.moveTo(p.x + Math.cos(angle) * radius * 0.2, p.y + Math.sin(angle) * radius * 0.2);
+          ctx.lineTo(p.x + Math.cos(angle) * reach, p.y + Math.sin(angle) * reach);
+          ctx.stroke();
+        }
+        ctx.lineCap = "butt";
+      }
+
+      // 3. 外へ抜ける輪
+      var ringSub = span(t, 0.15, 0.85);
+      if (ringSub > 0) {
+        setAlpha(ctx, fadeOut(ringSub) * 0.8);
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = Math.max(1, (d.ringWidth || 4) * (1 - ringSub));
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, (d.ringRadius || 130) * easeOut(ringSub), 0, Math.PI * 2);
+        ctx.stroke();
+      }
+
+      // 4. 遅れてもう一度、小さく光る（余韻）
+      var echo = span(t, 0.35, 0.3);
+      if (echo > 0) {
+        setAlpha(ctx, (1 - echo) * (1 - echo) * alpha * 0.7);
+        ctx.fillStyle = p.color;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, radius * 0.55 * easeOut(echo), 0, Math.PI * 2);
+        ctx.fill();
+      }
+    },
+
     /** 降りそそぐ：上から粒が落ちてくる */
     rain: function (ctx, d, t, p) {
       var count = d.count || 14;

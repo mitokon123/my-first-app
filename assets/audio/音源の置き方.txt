@@ -1,0 +1,124 @@
+音源（BGM・効果音）の置き方
+===========================
+
+このフォルダに音源ファイルをそのまま入れてください。
+入れたら data/audio.js の file に名前を書けば鳴ります。
+
+
+■ 形式
+
+  BGM   … mp3 または ogg
+  効果音 … mp3 / ogg / wav（wav は短いものだけ。容量が大きい）
+
+  ダウンロード形式がどれでも、上のどれかなら直さずに使えます。
+  m4a や aac しか無い場合は、鳴らないブラウザがあるので mp3 に変換してください。
+
+
+■ いま入っているもの（data/audio.js と同じ）
+
+  --- BGM ---
+    title.ogg            タイトル画面
+    home.ogg             拠点
+    shop.ogg             店
+    koubou.ogg           工房
+    abyss_dg.ogg         探索（深淵）
+    abyss_battle.ogg     通常戦闘（深淵）
+    abyss_bossbattle.ogg 主（ボス）との戦い（深淵）
+    victory.ogg          勝ったとき（繰り返さない）
+    lose.ogg             全滅したとき（繰り返さない）
+
+  --- 効果音 ---
+    メニュー
+      cursor.mp3    カーソルを動かした
+      confirm.mp3   決定
+      cancel.mp3    取り消し（できなかったときも同じ音）
+
+    戦闘
+      dageki1.mp3 / dageki2.mp3  打撃が当たった（毎回どちらか）
+      zangeki1.mp3               斬撃が当たった（爪や翼で斬る種族の通常攻撃）
+      heal.mp3      回復した（HP・PP・状態異常を治す。技も道具も）
+      buff.mp3      強化が掛かった
+      debuff.mp3    弱体が掛かった
+      faint.mp3     倒れた
+      flee.mp3      逃げようとした（成功でも失敗でも）
+      poison.mp3    毒（掛かった瞬間と、ターン終了のダメージ）
+      se_st_mahi.wav   麻痺
+      se_st_sleep.wav  眠り
+      se_st_fuin.wav   封印
+      se_st_blind.wav  盲目
+      se_st_noroi.wav  呪い
+      se_st_death.wav  即死（倒れる音を兼ねる）
+
+    技を出した瞬間（data/skills.js の se から指す）
+      se_fire_1.wav     ファイア
+      se_water_1.wav    アクア
+      se_wind_1.wav     ウィンド
+      se_earth_1.wav    ストーン
+      se_thunder_1.wav  サンダー
+      se_light_1.wav    フラッシュ
+      se_light_2.wav    シャイン
+      se_dark_1.wav     シャドウ
+      se_fire_breath.wav   火の息
+      se_dark_breath.wav   奈落の息
+      se_poison_breath.wav どくのいき
+      se_awa.wav        あわ
+      se_bodypress.wav  ボディプレス
+      se_dokubari.wav   どくばり
+      （体当たり・噛みつく・吸血・キュア・こうか・ちからぬきは出した瞬間の音なし）
+
+    探索・拠点
+      stairs.mp3    階段
+      openbox.mp3   宝箱を開けた／ものを作った
+      izumi.mp3     泉を使った
+      trap.mp3      罠を踏んだ
+      save.mp3      セーブした・中断した
+      buy.mp3       買った・売った
+      kikan.mp3     帰還の石で拠点へ戻った
+
+      se_miss.wav   外れた・かわされた・無効・状態異常が効かなかった
+
+  ファイルを置かずに、ゲームが波形から作っている音（data/audio.js の synth）
+      levelUp   レベルアップ
+
+  音を付けない、と決めてあるもの
+      会心（当たった音だけ）・いまひとつ・スカウトの成否・防御・入れ替え・
+      状態異常が解けた・動けなかったターン・主の登場・戦闘後の経験値やドロップ・
+      初クリア・図鑑の新登録・加護の切り替えと購入（決定音だけ）・エンディング
+
+  ★ 入れていない音は、何も鳴らずにそのまま進みます（エラーにはなりません）。
+
+
+■ 置いたあとにやること
+
+  data/audio.js を開いて、file に名前を書きます。
+
+    title: { file: null,        volume: 0.7 }
+      ↓
+    title: { file: "title.ogg", volume: 0.7 }
+
+  volume は「その素材だけの音量」です（0〜1）。
+  素材ごとに音の大きさが違うので、ここで揃えます。
+  プレイヤーが変える音量（設定画面）とは別なので、混ぜないこと。
+
+  技ごとの音は data/skills.js の se、状態異常ごとの音は data/statuses.js の se、
+  仕掛け（宝箱・泉・罠）の音は data/features.js の se、
+  当たった音（打撃／斬撃）は data/effects.js の hitSe から指します。
+
+
+■ 忘れずに：クレジットと再配布
+
+  フリー素材でも、サイトごとに条件が違います。使う前に必ず確認してください。
+
+  1. クレジット表記が要るか
+       要る場合は data/audio.js の credits に書きます。
+       タイトル画面の左下と「遊び方」の「音楽・効果音について」に自動で並びます。
+
+  2. 再配布して良いか  ← いちばん引っかかりやすい
+       GitHub などにこのフォルダごと上げることは「再配布」にあたります。
+       「素材の再配布禁止」と書かれている素材は、そのまま上げられません。
+
+  3. 商用・非商用の別
+
+  条件は素材サイトの規約が正です。ここに書いてあることではありません。
+
+  いまの出どころは data/audio.js の credits と README の「素材のクレジット」を見てください。

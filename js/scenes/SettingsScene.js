@@ -59,6 +59,9 @@
 
       if (input.isPressed("left")) this._changeValue(-1);
       if (input.isPressed("right")) this._changeValue(1);
+      if (input.isPressed("confirm")) this._activate();
+
+      this._handleMouse(input);
     }
 
     this._updateKeyScroll(input);
@@ -105,10 +108,75 @@
     return Math.max(0, total - (K.visibleRows || total));
   };
 
+  /**
+   * 項目1つぶんの四角。描画（_renderItems）と同じ計算にしてある。
+   * ずれると「押した場所と選ばれる項目」が食い違う。
+   */
+  SettingsScene.prototype._itemRowRect = function (index) {
+    var I = this.layout.items;
+    var box = this._itemsRect();
+    var origin = this.panel.innerOrigin(box);
+    var top = origin.y + 34;
+
+    return {
+      x: box.x, y: top + I.rowHeight * index - I.rowHeight + 10,
+      w: box.w, h: I.rowHeight
+    };
+  };
+
+  /**
+   * マウスで項目を選び、別の画面を開く項目なら押して開く。
+   *
+   * ★ 数値の項目は左右キーで変えるものなので、押しても何も起きない。
+   *   ここが無いと、**マウスだけでは「名前と見た目」を開けなかった**。
+   */
+  SettingsScene.prototype._handleMouse = function (input) {
+    if (!input.getPointer) return;
+
+    var pointer = input.getPointer();
+    if (!pointer.inside) return;
+    if (!pointer.moved && !pointer.clicked) return;
+
+    for (var i = 0; i < this.settings.items.length; i++) {
+      if (!NS.Panel.containsPoint(this._itemRowRect(i), pointer)) continue;
+
+      this.index = i;
+      if (pointer.clicked) this._activate();
+      return;
+    }
+  };
+
   SettingsScene.prototype._changeValue = function (direction) {
     var item = this.settings.items[this.index];
     if (!item) return;
+
     this.settings.step(item.id, direction);
+
+    // 音量はその場で反映する。動かしてから戻るまで分からないと、
+    // どれくらいにしたのか確かめようがない。
+    // 効果音の大きさは、左右を押したときのカーソル音（Game._playUiSounds）で
+    // そのまま聞ける。あちらは画面の更新のあとに鳴るので、変えた後の大きさになる
+    if (this.game.audio) this.game.audio.applyVolume();
+  };
+
+  /**
+   * 決定を押したときの動き。
+   *
+   * ふつうの項目（range）は左右で値を変えるだけなので、決定では何も起きない。
+   * 別の画面を開く項目（type: "action"）だけがここで反応する。
+   *
+   * ★ 開く先は data/settings.js の action に書く。
+   *   画面を増やしたいときは、ここに1行 case を足すだけでよい。
+   */
+  SettingsScene.prototype._activate = function () {
+    var item = this.settings.items[this.index];
+    if (!item || item.type !== "action") return;
+
+    if (item.action === "playerSetup") {
+      // 設定はここで保存しておく（別の画面へ移るので、戻ってこない場合がある）
+      this.settings.save();
+      this.game.scenes.change(new NS.PlayerSetupScene(this.game, this, "edit"));
+    }
   };
 
   /** 設定を保存してから前の画面へ戻る */
@@ -117,6 +185,7 @@
     if (!result.success) {
       // 保存できなかったときは戻らず知らせる（設定が消えることに気づけるように）
       this._showNotice(this.texts.saveFailed || "");
+      this.game.playError();
       return;
     }
     this.game.scenes.change(this.returnScene);
@@ -198,6 +267,12 @@
     if (selected) this.panel.drawText("▶", x, y, { color: t.cursorColor });
     this.panel.drawText(item.label, x + 18, y, { color: color });
 
+    // 別の画面を開く項目は、横棒ではなく「いまの中身」を出す
+    if (item.type === "action") {
+      this._renderActionRow(item, x, y, I, selected, color);
+      return;
+    }
+
     // 値を横棒で表す（選択中は左右で変えられることを ◀ ▶ で示す）
     var barX = x + 130;
     var barY = y - 8;
@@ -214,6 +289,31 @@
     if (selected) {
       this.panel.drawText("◀", barX - 14, y, { font: t.smallFont, color: t.cursorColor });
       this.panel.drawText("▶", barX + I.barWidth + 52, y, { font: t.smallFont, color: t.cursorColor });
+    }
+  };
+
+  /**
+   * 別の画面を開く項目の行。
+   * 数値ではないので横棒は出さず、**いま何になっているか**を出す。
+   * 名前と色なら「ソウタ／青」のように、開かなくても分かるようにする。
+   */
+  SettingsScene.prototype._renderActionRow = function (item, x, y, I, selected, color) {
+    var t = this.theme;
+    var text = "";
+
+    if (item.action === "playerSetup" && NS.PlayerLook) {
+      var def = NS.PlayerLook.colorDef(this.game.data, this.game.getPlayerColor());
+      text = this.game.getPlayerName() + (def ? ("  /  " + def.name) : "");
+    }
+
+    this.panel.drawText(text, x + 130, y, { font: t.smallFont, color: color });
+
+    // ★ 右端の位置は、横棒の行の「▶」よりも内側に取る。
+    //   同じ位置（+52）にすると、右揃えの文字が枠から12pxはみ出す
+    if (selected) {
+      this.panel.drawText(this.texts.openAction || "決定で開く",
+        x + 130 + I.barWidth + 34, y,
+        { align: "right", font: t.smallFont, color: t.cursorColor });
     }
   };
 

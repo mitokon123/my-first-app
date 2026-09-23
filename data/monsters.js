@@ -10,6 +10,31 @@
  *   倍率 = 1 - 耐性 × 0.10（data/battle.js の resistance.resistStep）
  *   マイナスのときは 倍率 = 1 + |耐性| × 0.20（同 weaknessStep）。-5 で2倍
  * immunities  : 完全に無効化する属性idの配列（耐性の値にかかわらずダメージ0）
+ *
+ * ▼ statusResist : 状態異常ごとの耐性。**式は属性耐性とまったく同じ**
+ *   （data/battle.js の resistance）。覚える仕組みを2つにしないため。
+ *     10 … 完全に効かない    5 … 通る確率が半分    0 … そのまま
+ *   足りないぶんは装備の resistBonus で足す（属性耐性と同じ書き方）。
+ *
+ *   ★ 全23種すべてに、7つの状態異常ぶんを書いてある。書き忘れを0にするため。
+ *     0（＝そのまま通る）も使う。書き忘れとの区別は
+ *     「全種そろっているか」を data の検査で見ればよい（早見表と突き合わせる）。
+ *
+ *   ★ 値は制作者が早見表（早見表/状態異常耐性.txt）で決めている。
+ *     このファイルとその表は必ず同じ値にしておくこと。
+ *
+ *   ★ α-8 で大幅に下げた。**ほとんどの種族・ほとんどの状態異常は 0**。
+ *     耐性が高いままだと、装備（毒よけの護符 +7 など）で足しても効きが変わらず、
+ *     装備を着ける理由そのものが無くなるため。
+ *     耐性を持たせるのは「その状態異常を受ける理由が無い」相手だけにする。
+ *       例：コウモリ・ハイバネ 盲目10（目に頼らない）／ビリムシ 麻痺10（雷そのもの）
+ *           イワゴロー・ヒビイワ 毒10（岩）／カゲヅタ 眠り10（植物）
+ *           ヌマボネ 即死10（もう死んでいる）
+ *
+ *   ★ 主（ボス）として立ちはだかっているあいだは、
+ *     data/battle.js の bossImmuneToStatus が 即死・封印・盲目 を無効にする（全ボス共通）。
+ *     いまの主4体は data/bosses.js で毒も個別に無効にしてある。
+ *     ここの値が効くのは、スカウトして仲間にしたあと。
  * maxLevel    : このモンスターのレベル上限（省略時は growth.js の defaultMaxLevel）
  *   growth.js の levelCap（99）を超えることはできない
  * growthRate  : 1レベルごとのステータス上昇率（0.01〜0.55。範囲外は丸められる）
@@ -91,6 +116,9 @@
       element: "water",
       resistances: { water: 5, thunder: -2, dark: -1 },
       immunities: [],
+      // 体が液体なので毒は薄まり、神経が無いので麻痺・眠りも通りにくい。目も持たない
+      statusResist: { poison: 8, paralysis: 5, sleep: 0, seal: 0,
+                      blind: 0, curse: 0, instantDeath: 5 },
       // 上限99の3種のうちの1体。強さで抜けるのではなく、長く付き合える枠
       maxLevel: 99,
       growthRate: { hp: 0.16, attack: 0.16, defense: 0.18, speed: 0.13, pp: 0.10 },
@@ -117,7 +145,7 @@
       expReward: 8,
       goldReward: 4,
       drops: [
-        { item: "herb", rate: 0.07, min: 1, max: 1 }
+        { item: "herb", rate: 0.12, min: 1, max: 1 }
       ],
       // コマ絵の見本。ふつうの姿を使い回すので、描き足したのは2枚だけ
       sprite: ["slimeStretch", "slime", "slimeStretch", "slimeSquash"],
@@ -139,6 +167,9 @@
       element: "dark",
       resistances: { dark: 3, earth: 3, fire: -2, thunder: -2 },
       immunities: [],
+      // 超音波で「見て」いるので盲目がほとんど効かない。闇の眷属なので呪いにも強い
+      statusResist: { poison: 0, paralysis: 0, sleep: 5, seal: 0,
+                      blind: 10, curse: 0, instantDeath: 5 },
       // 上限99の3種のうちの1体。育て切ると素早さが全種で最も高くなる
       maxLevel: 99,
       // ステータスごとに成長率を変える例：素早さだけ伸びやすい
@@ -179,6 +210,9 @@
       element: "earth",
       resistances: { earth: 5, wind: -1, fire: -2 },
       immunities: [],
+      // ただの獣なので、どれもあまり効かない。特性「ど根性」ぶん即死だけ少し高い
+      statusResist: { poison: 0, paralysis: 2, sleep: 2, seal: 0,
+                      blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.14, attack: 0.16, defense: 0.15, speed: 0.15, pp: 0.10 },
       description: "背中に苔を生やした小さなネズミ。坑道の壁を素早く走り回る。",
@@ -198,7 +232,7 @@
       expReward: 11,
       goldReward: 5,
       drops: [
-        { item: "herb", rate: 0.085, min: 1, max: 1 }
+        { item: "herb", rate: 0.14, min: 1, max: 1 }
       ],
       sprite: "mossRat",
       motion: "ratHop",
@@ -212,6 +246,9 @@
       element: "earth",
       resistances: { earth: 4, water: -2 },
       immunities: [],
+      // 岩なので毒がまったく通らない。技を組み立てる頭は無いので封印は半分効く
+      statusResist: { poison: 10, paralysis: 0, sleep: 0, seal: 5,
+                      blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.18, attack: 0.15, defense: 0.20, speed: 0.06, pp: 0.10 },
       description: "岩そのものが動き出したような魔物。硬いが、とにかく足が遅い。",
@@ -233,10 +270,10 @@
       expReward: 12,
       goldReward: 8,
       drops: [
-        { item: "oreShard", rate: 0.15, min: 1, max: 2 },
+        { item: "oreShard", rate: 0.25, min: 1, max: 2 },
         // 買えない装備。イワゴローは坑道の6種のうちの1体なので、
-        // 出現率で薄まるぶんを見込んで確率は高めにしてある（実測で約60戦に1つ）
-        { item: "stoneMail", rate: 0.08, min: 1, max: 1 }
+        // 出現率で薄まるぶんを見込んで確率は高めにしてある
+        { item: "stoneMail", rate: 0.19, min: 1, max: 1 }
       ],
       sprite: "rocky",
       motion: "rockIdle",
@@ -253,6 +290,9 @@
       // この1種しかいないのに、その息で一撃で落ちてしまうため -2 に緩めた
       resistances: { light: 7, dark: -2 },
       immunities: [],
+      // 自ら光るので盲目が効かず、光は呪いを弾く。虫なので体そのものは脆い
+      statusResist: { poison: 0, paralysis: 0, sleep: 0, seal: 5,
+                      blind: 0, curse: 0, instantDeath: 5 },
       // 深層のヨミリュウへの答えを担うので、坑道の雑魚だが上限は高くしてある
       maxLevel: 80,
       growthRate: { hp: 0.14, attack: 0.16, defense: 0.16, speed: 0.18, pp: 0.15 },
@@ -278,7 +318,7 @@
       expReward: 14,
       goldReward: 7,
       drops: [
-        { item: "glowDust", rate: 0.1667, min: 1, max: 1 }
+        { item: "glowDust", rate: 0.25, min: 1, max: 1 }
       ],
       sprite: "glowBug",
       motion: "bugGlow",
@@ -293,6 +333,9 @@
       element: "dark",
       resistances: { earth: 4, dark: 2, light: -1 },
       immunities: [],
+      // 自分が闇の胞子（毒）を撒く側なので毒に強い。目を持たず、闇にも近い
+      statusResist: { poison: 10, paralysis: 0, sleep: 0, seal: 0,
+                      blind: 0, curse: 0, instantDeath: 3 },
       maxLevel: 70,
       growthRate: { hp: 0.15, attack: 0.16, defense: 0.14, speed: 0.12, pp: 0.14 },
       description: "坑道の湿った隅に生えるキノコの魔物。近づくと胞子を撒き散らす。",
@@ -312,7 +355,7 @@
       expReward: 16,
       goldReward: 8,
       drops: [
-        { item: "herb", rate: 0.10, min: 1, max: 1 }
+        { item: "herb", rate: 0.15, min: 1, max: 1 }
       ],
       sprite: "sporin",
       motion: "sporeSway",
@@ -330,6 +373,11 @@
       // 全身が苔に覆われているぶん、火と光に弱い
       resistances: { earth: 5, water: 2, fire: -2, light: -2 },
       immunities: [],
+      // 石の体なので毒・麻痺・眠りが通らない。主なので即死にも強い
+      //   ※ 主として立ちはだかっているあいだは即死・封印・盲目が効かず（data/battle.js）、
+      //     毒も bosses.js で無効にしてある。この値が効くのは、スカウトして仲間にしたあと
+      statusResist: { poison: 8, paralysis: 7, sleep: 8, seal: 0,
+                      blind: 7, curse: 0, instantDeath: 9 },
       maxLevel: 50,
       // 守りとHPが伸び、足は止まったまま。ヒビイワ（構造体の在来種）の上位版という形
       growthRate: { hp: 0.17, attack: 0.14, defense: 0.19, speed: 0.07, pp: 0.10 },
@@ -373,6 +421,9 @@
       // 火は完全に無効（data/battle.js の immuneAt が10）。水は最大の弱点のまま
       resistances: { fire: 10, water: -4, wind: -1 },
       immunities: [],
+      // 主なので即死に強い。獣なので目は効く
+      statusResist: { poison: 0, paralysis: 10, sleep: 0, seal: 9,
+                      blind: 9, curse: 0, instantDeath: 9 },
       maxLevel: 50,
       // 攻めと速さが伸び、守りが置いていかれる。育てるほど「殴られる前に殴る」形になる
       growthRate: { hp: 0.16, attack: 0.19, defense: 0.11, speed: 0.17, pp: 0.13 },
@@ -418,6 +469,9 @@
       element: "water",
       resistances: { water: 9, thunder: -3, dark: -1 },
       immunities: [],
+      // 最後の主。スライムの性質（液体・神経なし・目なし）に、王としての格が乗る
+      statusResist: { poison: 10, paralysis: 10, sleep: 0, seal: 0,
+                      blind: 5, curse: 2, instantDeath: 9 },
       // 王なので上限はいちばん高い。ヨミリュウ(75)より上に置いてある
       maxLevel: 85,
       // 王らしくHPと守りに寄せ、足は捨てる。
@@ -467,6 +521,9 @@
       // 濡れた羽と、雷を受け止める体の軽さが弱点
       resistances: { fire: 5, earth: 4, thunder: -2, water: -2 },
       immunities: [],
+      // 体がひどく軽い鳥。空を見ているので盲目が効かないが、打たれ弱い
+      statusResist: { poison: 0, paralysis: 0, sleep: 0, seal: 0,
+                      blind: 10, curse: 0, instantDeath: 0 },
       maxLevel: 70,
       // 素早さだけ突出させる。そのぶん打たれ弱い
       growthRate: { hp: 0.12, attack: 0.18, defense: 0.11, speed: 0.20, pp: 0.13 },
@@ -494,7 +551,7 @@
       drops: [
         { item: "ashFeather", rate: 0.28, min: 1, max: 1 },
         // 買えない装備。ゲーム中で唯一、風の技が伸びる
-        { item: "windCrest", rate: 0.04, min: 1, max: 1 }
+        { item: "windCrest", rate: 0.13, min: 1, max: 1 }
       ],
       sprite: "ashWing",
       // 体がひどく軽いので、羽ばたきは速いが体は熱に乗ってゆっくり漂う
@@ -511,6 +568,9 @@
       // ゲーム中で初めての「地の弱点」を持つモンスター
       resistances: { fire: 8, earth: -3, water: -2 },
       immunities: [],
+      // イワゴローと同じ岩なので、耐性もそろえてある
+      statusResist: { poison: 10, paralysis: 0, sleep: 0, seal: 5,
+                      blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.16, attack: 0.15, defense: 0.18, speed: 0.08, pp: 0.10 },
       description: "熱で焼けてひび割れた岩の魔物。守りは固いが、同じ石をぶつけられると脆い。",
@@ -549,6 +609,9 @@
       // マグマの中で暮らすので火はほとんど効かない。水をかけられると固まる
       resistances: { fire: 9, water: -4, thunder: -1, light: -1 },
       immunities: [],
+      // 硬い殻に覆われているので毒が回らない。封印と呪いは完全に弾く
+      statusResist: { poison: 0, paralysis: 5, sleep: 5, seal: 0,
+                      blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 65,
       growthRate: { hp: 0.18, attack: 0.16, defense: 0.15, speed: 0.10, pp: 0.12 },
       description: "マグマの中で暮らす大きなカニ。硬い殻をさらに固めて、じっと動かない。",
@@ -592,6 +655,9 @@
       // 亀裂の在来種なので火には強いが、火が消える水にはとても弱い
       resistances: { fire: 6, water: -3, earth: -1 },
       immunities: [],
+      // 燃えさしなので、どれもそこそこ通る。消されやすい（即死0）
+      statusResist: { poison: 0, paralysis: 0, sleep: 0, seal: 0,
+                      blind: 0, curse: 2, instantDeath: 0 },
       maxLevel: 50,
       growthRate: { hp: 0.13, attack: 0.16, defense: 0.14, speed: 0.16, pp: 0.11 },
       description: "燃えさしの炭が起き上がったもの。一体ずつは弱いが、群れで湧いてくる。",
@@ -630,6 +696,9 @@
       element: "fire",
       resistances: { fire: 8, water: -3 },
       immunities: [],
+      // 気性が荒く、しびれにくい。ただし目と呪いには無防備
+      statusResist: { poison: 0, paralysis: 5, sleep: 0, seal: 0,
+                      blind: 5, curse: 0, instantDeath: 5 },
       // 上限99の3種のうちの1体。序盤で捕まえても最後まで通用する
       maxLevel: 99,
       growthRate: { hp: 0.14, attack: 0.18, defense: 0.15, speed: 0.15, pp: 0.12 },
@@ -671,6 +740,9 @@
       // 深層の在来種は雷に弱くしてある（雷はまだ耐性持ちが0体で、誰にでも通る属性）
       resistances: { dark: 6, light: -3, thunder: -2 },
       immunities: [],
+      // 澱みそのもの。目を持たず、闇に近いので呪いも効きにくい
+      statusResist: { poison: 0, paralysis: 0, sleep: 2, seal: 0,
+                      blind: 0, curse: 4, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.15, attack: 0.15, defense: 0.13, speed: 0.13, pp: 0.11 },
       description: "底に溜まった闇が、ひとりでに形を持ったもの。一体では頼りないが、静かに数を増やす。",
@@ -712,6 +784,9 @@
       // 植物なので火に灼かれる。ここまでに火のモンスターを育てていれば刺さる
       resistances: { dark: 5, earth: 3, fire: -4, light: -2, thunder: -1 },
       immunities: [],
+      // 目を持たず、植物なので眠らない。ただし毒は素通りする
+      statusResist: { poison: 0, paralysis: 0, sleep: 10, seal: 0,
+                      blind: 7, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.17, attack: 0.12, defense: 0.16, speed: 0.11, pp: 0.13 },
       description: "闇の底で根を張る蔦。獲物にからみついて、少しずつ力を吸い取る。",
@@ -758,6 +833,11 @@
       // 雷を身に宿しているので雷には強い。地に落とされると電気が抜ける
       resistances: { thunder: 6, wind: 3, earth: -3 },
       immunities: [],
+      // ★ 雷を身に宿しているので、しびれることが無い（10＝完全に効かない）。
+      //   マグマウルフの火10と同じ「一点だけ突き抜けている」形。
+      //   そのかわり虫なので、体そのものは脆いまま
+      statusResist: { poison: 0, paralysis: 10, sleep: 0, seal: 2,
+                      blind: 0, curse: 0, instantDeath: 0 },
       // 仲間にする価値を持たせたいので、上限は高めにしてある
       maxLevel: 70,
       growthRate: { hp: 0.12, attack: 0.17, defense: 0.12, speed: 0.16, pp: 0.14 },
@@ -782,7 +862,7 @@
       drops: [
         { item: "stormWing", rate: 0.24, min: 1, max: 1 },
         // 買えない装備。雷を扱えるのはビリムシだけなので、実質この種族専用になる
-        { item: "chargedCore", rate: 0.05, min: 1, max: 1 }
+        { item: "chargedCore", rate: 0.15, min: 1, max: 1 }
       ],
       sprite: "boltBug",
       motion: "boltFlit",
@@ -800,6 +880,12 @@
       // 水そのものなので火は通らない。電気を流されるといちばん効く
       resistances: { water: 7, fire: 2, thunder: -4, earth: -2 },
       immunities: [],
+      // 水そのもの。形が決まっていないので、どの状態異常もほどほどに効きにくい
+      //
+      // ☆ 麻痺10（完全に効かない）は、属性の雷 -4（2倍のダメージ）と向きが逆。
+      //   「電気は通すが、しびれる神経が無い」と読めば通る。意図した組み合わせ
+      statusResist: { poison: 3, paralysis: 10, sleep: 0, seal: 0,
+                      blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 70,
       growthRate: { hp: 0.18, attack: 0.16, defense: 0.14, speed: 0.08, pp: 0.14 },
       description: "底の水が集まって形を取ったもの。近づいたものを、重い水塊で叩き潰す。",
@@ -852,6 +938,13 @@
       // 光だけが2倍で通る、という一点突破の形にしてある
       resistances: { dark: 10, earth: 5, fire: 3, water: 3, light: -5 },
       immunities: [],
+      // 闇の頂点。麻痺と即死は完全に効かない。
+      // 通るのは眠りと呪い ——「眠らせてから殴る」が搦め手になる。
+      // ★ 出るときの倍率と行動手順は data/dungeons.js のエントリに書いてある
+      //   （HP×2.25・攻×0.9・防×1.25／闇の息→噛みつく→通常攻撃）。
+      //   ここの値は「仲間にしたとき」の素の強さ
+      statusResist: { poison: 5, paralysis: 10, sleep: 0, seal: 5,
+                      blind: 3, curse: 0, instantDeath: 10 },
       // 上限まで育てると全種で最も強くなる（攻撃・防御・PPが1位）。
       // 上限99の3種より低いのは、そちらが「長く付き合う枠」で格とは別軸だから
       maxLevel: 75,
@@ -881,9 +974,18 @@
       drops: [
         { item: "dragonScale", rate: 0.35, min: 1, max: 1 },
         { item: "abyssFragment", rate: 0.28, min: 1, max: 1 },
-        // 買えない装備。竜自体がB3F以降で7%しか出ないので、
-        // 5%でもいちばん渋いドロップになる（実測で約130戦に1つ）
-        { item: "fangRing", rate: 0.05, min: 1, max: 1 }
+        // 買えない装備。
+        //
+        // ★ ここだけ極端に高いのは、竜そのものが出ないから。
+        //   B4Fにしか出ず、しかも単体出現。
+        //   「レアな相手」×「レアなドロップ」で二重に薄まるので、
+        //   5%にしていたころは実測417戦＝27回の挑戦に1つだった
+        //   （他の買えない装備は4〜8回）。竜を約20体倒す計算になる。
+        //   20%にして、竜を5体倒せば1つ ＝ 約7回の挑戦に落ち着かせた。
+        //
+        // ☆ この率を触るときは、必ず「戦闘あたり」ではなく
+        //   「挑戦（ラン）あたり」で見ること。竜の出現率を通すと3倍以上変わる
+        { item: "fangRing", rate: 0.20, min: 1, max: 1 }
       ],
       sprite: "abyssDragon",
       // 竜なので、他のモンスターより一回り大きく画面に出す
@@ -891,6 +993,197 @@
       // 大きいものほどゆっくり深く息をする。縦と横をずらして、体と翼を別々に動かす
       motion: "dragonBreathe",
       motions: { faint: "crumble" }
+    },
+
+    /**
+     * --- 腐食の毒沼の在来種（ステージ4・推奨Lv20） ---
+     *
+     * ★ 基礎値はステージ3とほぼ同じ帯に置いてある。
+     *   基礎値を上げて格を出すと、仲間にしたときにレベル差以上に強くなる
+     *   （基礎値+10はLv15で+31になる）。格はレベルと成長率と技で出す。
+     *
+     * ★ 強さは「回復なしで何戦もつか」で合わせてある。
+     *   1戦ごとの勝率で見ると、満タンから始まるのでどれも100%になり、
+     *   きつさが測れない。実際の挑戦では回復せずに連戦するので、そちらで測った。
+     *     ステージ3 B1F 7戦 / B4F 3戦（味方Lv16）
+     *     ステージ4 B1F 7戦 / B4F 3戦（味方Lv20）  ← 同じ手応えにそろえた
+     *   最初に置いた案では B4F が2戦しかもたず、ステージ3より厳しくなっていた。
+     *   ドクバチとヌマボネの攻撃を1段下げて合わせてある。
+     */
+
+    // 沼の雑魚。速いが脆い。毒を入れてくる相手。
+    // ステージ3のビリムシと同じ「先に動いて削る」役だが、こちらは毒を持つ
+    venomBee: {
+      id: "venomBee",
+      name: "ドクバチ",
+      family: "insectKind",
+      element: "dark",
+      resistances: { dark: 5, wind: 2, fire: -1, light: -2 },
+      immunities: [],
+      // 自分が毒を使う側なので毒は完全に効かない。羽音で眠らないが、体は脆い
+      statusResist: { poison: 10, paralysis: 0, sleep: 0, seal: 2,
+                      blind: 2, curse: 6, instantDeath: 0 },
+      maxLevel: 65,
+      growthRate: { hp: 0.13, attack: 0.18, defense: 0.11, speed: 0.17, pp: 0.12 },
+      description: "毒沼の上を群れで飛ぶ蜂。刺されると傷そのものより、あとに残る毒が長く効く。",
+      baseHp: 17,
+      baseAttack: 8,
+      baseDefense: 5,
+      baseSpeed: 12,
+      basePp: 5,
+      // 小さく速いのでかわしやすい（ビリムシと同じ0.05〜0.06の帯）
+      evasion: 0.06,
+      scoutRate: 0.36,
+      spawnRate: 1.0,
+      learnset: [
+        { level: 1, skill: "tackle" },
+        // 出現下限がLv14なので、出会う個体は必ず毒を持っている
+        { level: 4, skill: "venomSting" },
+        { level: 12, skill: "bite" }
+      ],
+      evolvesTo: null,
+      abilities: ["swiftFoot"],
+      expReward: 28,
+      goldReward: 10,
+      drops: [
+        { item: "venomStinger", rate: 0.30, min: 1, max: 2 }
+      ],
+      sprite: "venomBee",
+      motion: "beeHover",
+      // 飛んでいるので、傾きながら落ちる
+      motions: { faint: "tumble", levelUp: "cheerSpin" }
+    },
+
+    // 沼の壁役。カゲヅタ（深層の壁役）の一段上。
+    // 硬いだけでなく、甲羅の泥から毒の息を吐くので放置もできない
+    mudTurtle: {
+      id: "mudTurtle",
+      name: "ドロガメ",
+      family: "beastKind",
+      element: "earth",
+      resistances: { earth: 7, water: 2, thunder: -2 },
+      immunities: [],
+      // 甲羅に覆われているので毒と麻痺が通りにくい。ただし呪いと即死には無防備
+      statusResist: { poison: 8, paralysis: 0, sleep: 0, seal: 5,
+                      blind: 5, curse: 0, instantDeath: 0 },
+      maxLevel: 65,
+      growthRate: { hp: 0.18, attack: 0.13, defense: 0.17, speed: 0.08, pp: 0.12 },
+      description: "沼底の泥をかぶった亀。甲羅に溜めた泥から、たえず毒の息を漏らしている。",
+      baseHp: 25,
+      baseAttack: 6,
+      baseDefense: 10,
+      baseSpeed: 3,
+      basePp: 5,
+      scoutRate: 0.28,
+      spawnRate: 0.8,
+      // こうかは持たせない（ミズダマリと同じ理由。硬い相手をさらに硬くすると戦闘がだれる）
+      learnset: [
+        { level: 1, skill: "tackle" },
+        { level: 10, skill: "venomBreath" }
+      ],
+      evolvesTo: null,
+      abilities: ["thickSkin"],
+      expReward: 32,
+      goldReward: 14,
+      drops: [
+        { item: "muddyShell", rate: 0.28, min: 1, max: 1 },
+        { item: "oreShard", rate: 0.20, min: 1, max: 1 }
+      ],
+      sprite: "mudTurtle",
+      motion: "turtleBreathe",
+      // 甲羅なので、倒れるというより崩れる
+      motions: { faint: "crumble" }
+    },
+
+    // 沼に沈んだ者の骨。搦め手の役。
+    // 骨なので毒と眠りがほとんど効かず、毒で押す戦い方の「答えにならない相手」になる
+    marshBone: {
+      id: "marshBone",
+      name: "ヌマボネ",
+      family: "demonKind",
+      element: "dark",
+      resistances: { dark: 7, earth: 2, fire: -1, light: -2 },
+      immunities: [],
+      // ★ 骨なので毒・麻痺・眠りが通りにくく、**即死は完全に効かない**（もう死んでいる）。
+      //   毒だけで押す戦い方に、この階で一度ブレーキをかける相手
+      statusResist: { poison: 8, paralysis: 0, sleep: 0, seal: 0,
+                      blind: 0, curse: 5, instantDeath: 10 },
+      maxLevel: 70,
+      growthRate: { hp: 0.16, attack: 0.15, defense: 0.13, speed: 0.13, pp: 0.15 },
+      description: "沼に沈んだ者の骨が、泥に浮いたまま動いている。眼窩の奥だけが青く光る。",
+      baseHp: 20,
+      baseAttack: 11,
+      baseDefense: 6,
+      baseSpeed: 8,
+      basePp: 7,
+      scoutRate: 0.24,
+      spawnRate: 0.7,
+      learnset: [
+        { level: 1, skill: "tackle" },
+        { level: 6, skill: "sapStrength" },
+        { level: 12, skill: "darkSpore" }
+      ],
+      evolvesTo: null,
+      abilities: ["duskborn"],
+      expReward: 36,
+      goldReward: 17,
+      drops: [
+        { item: "rustedBone", rate: 0.28, min: 1, max: 1 },
+        { item: "abyssFragment", rate: 0.20, min: 1, max: 1 },
+        // 買えない装備。ゲーム中で初めての即死耐性。
+        //   ☆ 率は必ず「戦闘あたり」ではなく「挑戦（ラン）あたり」で見ること。
+        //     ヌマボネは毒沼の25%を占めるので、同じ率でも他の種族より早く集まる
+        { item: "boneCharm", rate: 0.16, min: 1, max: 1 }
+      ],
+      sprite: "marshBone",
+      motion: "boneSway",
+      // 骨なので崩れ落ちる
+      motions: { faint: "crumble" }
+    },
+
+    // 腐食の毒沼の主（data/bosses.js の swampLord が使う種族）。
+    // 主として出るときだけ倍率が掛かる。仲間にすればこの素の値に戻る
+    marshLord: {
+      id: "marshLord",
+      name: "ヌシガエル",
+      family: "beastKind",
+      element: "water",
+      resistances: { water: 5, earth: 3, dark: 3, light: -2, thunder: -3 },
+      immunities: [],
+      // この沼の毒はこいつが出しているので、毒は完全に効かない（10）。
+      // 大きく鈍いので麻痺・眠りは意外と通る
+      statusResist: { poison: 10, paralysis: 0, sleep: 0, seal: 10,
+                      blind: 0, curse: 0, instantDeath: 9 },
+      maxLevel: 80,
+      growthRate: { hp: 0.18, attack: 0.17, defense: 0.14, speed: 0.08, pp: 0.13 },
+      description: "沼の主。動かずに口だけを開けて待ち、近づいたものを丸ごと呑む。",
+      baseHp: 30,
+      baseAttack: 11,
+      baseDefense: 8,
+      baseSpeed: 5,
+      basePp: 7,
+      scoutRate: 0.12,
+      // 主なので、ふつうの遭遇には出ない
+      spawnRate: 0,
+      learnset: [
+        { level: 1, skill: "tackle" },
+        { level: 3, skill: "bodyPress" },
+        { level: 6, skill: "bubble" },
+        { level: 8, skill: "venomBreath" },
+        { level: 14, skill: "bite" }
+      ],
+      evolvesTo: null,
+      abilities: ["thickSkin"],
+      expReward: 140,
+      goldReward: 95,
+      drops: [
+        { item: "venomSac", rate: 1.0, min: 1, max: 1 }
+      ],
+      sprite: "marshLord",
+      // 横に広い主。他の3体（1.15 / 1.25 / 1.4）の間に置いてある
+      sizeScale: 1.3,
+      motion: "lordBreathe",
+      motions: { faint: "fall" }
     }
   };
 })(window.MyGame);

@@ -85,10 +85,23 @@
       unlockedBy: "mossyMine"
     },
 
-    // 灼熱の獣の落とすものを使う。苔の護符（守り）に対する、攻めの装備
+    // 亀裂の素材で作る武器。火の技を使う仲間向け
+    emberBlade: {
+      id: "emberBlade",
+      order: 7,
+      result: { item: "emberBlade", count: 1 },
+      materials: [
+        { item: "emberAsh", count: 2 },
+        { item: "scorchedShell", count: 1 },
+        { item: "oreShard", count: 2 }
+      ],
+      unlockedBy: "mossyMine"
+    },
+
+    // 灼熱の獣の落とすものを使う。苔の外套（守り）に対する、攻めの装備
     blazeCharm: {
       id: "blazeCharm",
-      order: 7,
+      order: 8,
       result: { item: "blazeCharm", count: 1 },
       materials: [
         { item: "blazingFang", count: 1 },
@@ -104,13 +117,13 @@
      * 亀裂のときと同じで、解放は「深層をクリア」ではなく「亀裂をクリア」。
      * 素材は深層に潜っている最中に集まるので、クリアを待たせると
      * 素材を持っているのに作れない時間ができてしまう。
-     * 竜鱗の護だけはヨミリュウ（B3F以降・出現7%）を倒さないと素材がそろわないので、
+     * 黄泉鱗の鎧だけはヨミリュウ（B4Fのみ・出現16%）を倒さないと素材がそろわないので、
      * 一覧に出しておいても先に作られる心配はない。
      */
 
     duskWard: {
       id: "duskWard",
-      order: 8,
+      order: 9,
       result: { item: "duskWard", count: 1 },
       materials: [
         { item: "duskDew", count: 3 },
@@ -121,7 +134,7 @@
 
     stormVeil: {
       id: "stormVeil",
-      order: 9,
+      order: 10,
       result: { item: "stormVeil", count: 1 },
       materials: [
         { item: "stormWing", count: 2 },
@@ -130,10 +143,23 @@
       unlockedBy: "scorchingFissure"
     },
 
-    // 竜の鱗を使う。ヨミリュウを狩る理由になるレシピ
+    // 深層の素材で作る武器。攻撃は戦刃に届かないが速さも付く
+    abyssFang: {
+      id: "abyssFang",
+      order: 11,
+      result: { item: "abyssFang", count: 1 },
+      materials: [
+        { item: "abyssFragment", count: 2 },
+        { item: "slimeShard", count: 2 },
+        { item: "duskDew", count: 1 }
+      ],
+      unlockedBy: "scorchingFissure"
+    },
+
+    // 黄泉竜の鱗を使う。ヨミリュウを狩る理由になるレシピ
     dragonGuard: {
       id: "dragonGuard",
-      order: 10,
+      order: 12,
       result: { item: "dragonGuard", count: 1 },
       materials: [
         { item: "dragonScale", count: 1 },
@@ -143,10 +169,10 @@
       unlockedBy: "scorchingFissure"
     },
 
-    // 深淵の王の落とすものを使う。今のところ最後に作れる装備
+    // 深淵の王の落とすものを使う。ステージ3を締めくくる装備
     crownCircle: {
       id: "crownCircle",
-      order: 11,
+      order: 13,
       result: { item: "crownCircle", count: 1 },
       materials: [
         { item: "crownShard", count: 1 },
@@ -154,6 +180,68 @@
         { item: "abyssFragment", count: 3 }
       ],
       unlockedBy: "scorchingFissure"
+    },
+
+    /**
+     * --- 腐食の毒沼で集まる素材で作るもの ---
+     *
+     * 亀裂・深層と同じで、解放は「毒沼をクリア」ではなく「深層をクリア」。
+     * 素材は沼に潜っている最中に集まるので、クリアを待たせると
+     * 素材を持っているのに作れない時間ができてしまう。
+     *
+     * ★ 毒よけの護符は**主の素材を使わない**。
+     *   毒沼は歩くだけで削られる場所なので、その答えは
+     *   主を倒す前に手に入らないと意味がない。
+     *   毒嚢を使う「毒沼の冠」だけが、主を倒してから作れる。
+     */
+
+    // 毒沼の答え。毒耐性 +7（通る確率が3割になる）
+    venomWard: {
+      id: "venomWard",
+      order: 14,
+      result: { item: "venomWard", count: 1 },
+      materials: [
+        { item: "venomStinger", count: 2 },
+        { item: "muddyShell", count: 2 }
+      ],
+      unlockedBy: "silentDepths"
+    },
+
+    // 石の帽子（防+4）の上位。深層の素材で作る中堅の防具
+    mireArmor: {
+      id: "mireArmor",
+      order: 15,
+      result: { item: "mireArmor", count: 1 },
+      materials: [
+        { item: "muddyShell", count: 3 },
+        { item: "rustedBone", count: 2 }
+      ],
+      unlockedBy: "silentDepths"
+    },
+
+    // 毒沼の素材で作る武器。闇の技を使う仲間向け
+    marshSpear: {
+      id: "marshSpear",
+      order: 16,
+      result: { item: "marshSpear", count: 1 },
+      materials: [
+        { item: "rustedBone", count: 2 },
+        { item: "abyssFragment", count: 2 }
+      ],
+      unlockedBy: "silentDepths"
+    },
+
+    // 沼の主の毒嚢を使う。毒沼を抜けた証になる装備
+    venomCrown: {
+      id: "venomCrown",
+      order: 17,
+      result: { item: "venomCrown", count: 1 },
+      materials: [
+        { item: "venomSac", count: 1 },
+        { item: "rustedBone", count: 2 },
+        { item: "abyssFragment", count: 2 }
+      ],
+      unlockedBy: "silentDepths"
     }
   };
 })(window.MyGame);

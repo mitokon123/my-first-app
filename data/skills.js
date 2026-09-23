@@ -31,10 +31,18 @@
  *   威力（power）を持たない技は、掛けるだけでダメージを与えない。
  *   同じ技を重ねがけしても効果は重ならず、残りターン数が建て直されるだけ。
  *   戦闘が終わると全部消える。
- *   ※ 状態異常（毒・まひなど）はこれとは別の仕組みで作る予定
+ * ▼ status : 状態異常をあたえる。書き方は modifier と同じ考え方で1行だけ
+ *     { id: "poison", chance: 0.6 }
+ *   chance に相手の耐性（monsters.js の statusResist）が掛かって通りやすさが決まる。
+ *   中身は data/statuses.js。威力も持つ技（どくばり）は、毒を入れたあとダメージへ進む。
+ *   範囲技（allEnemies）では**1体ずつ判定する**ので、かかる子とかからない子が分かれる。
  * element       : 属性id（elements.js を参照）。"none" は耐性の影響を受けない
  * effect        : 当たったときの演出の型（data/effects.js の shapes のid）
  *                 省略すると演出なし。色は element から決まるので指定しない
+ * se            : 出した瞬間の音（data/audio.js の se のid）。省略で無音。
+ *                 ★ se を書いた技は、当たったときの打撃／斬撃音を鳴らさない（技の音だけで完結）。
+ *                 se の無い技は、effect の型（data/effects.js の hitSe）から打撃／斬撃が鳴る
+ * hitSe         : 当たった音を自分で決めたいときだけ書く（"hit" / "slash" で鳴らす、null で止める）。ふつうは書かない
  * description   : 技を選ぶときに出る説明文
  * showInDex     : false なら図鑑の「技」に載せない（省略すると載る）。
  *                 通常攻撃は覚える技ではなくコマンドなので、これで隠してある
@@ -95,6 +103,7 @@
       target: "enemy",
       element: "fire",
       effect: "burst",
+      se: "fire",
       description: "小さな炎を放つ。火に弱い相手によく効く。"
     },
 
@@ -107,6 +116,7 @@
       target: "enemy",
       element: "earth",
       effect: "shards",
+      se: "earth",
       description: "石を投げつける。地に弱い相手によく効く。"
     },
 
@@ -119,6 +129,7 @@
       target: "enemy",
       element: "light",
       effect: "flash",
+      se: "light",
       description: "強い光を浴びせる。光に弱い相手によく効く。"
     },
 
@@ -131,6 +142,7 @@
       target: "enemy",
       element: "dark",
       effect: "rain",
+      se: "dark",
       description: "闇をまとわせる。闇に弱い相手によく効く。"
     },
 
@@ -143,6 +155,7 @@
       target: "enemy",
       element: "water",
       effect: "rain",
+      se: "water",
       description: "水をぶつける。水に弱い相手によく効く。"
     },
 
@@ -155,6 +168,7 @@
       target: "enemy",
       element: "wind",
       effect: "slash",
+      se: "wind",
       // 見た目は「切る」だが、自分は踏み込まず離れて放つ
       // （書かないと effect から踏み込みだと判断される）
       motion: "cast",
@@ -164,16 +178,18 @@
     // --- 範囲技 ---
 
     // ゲーム中で初めての範囲全体の技。マグマウルフだけが使う。
-    // 1体あたりの威力は基本技（15）より低いが、3体に届くので総量は大きい
+    // 1体あたりの威力は基本技と同じ15で、3体に届くぶん総量は3倍になる。
+    // そのかわり会心が出ず、PPも重い（息の技に共通の決まり）
     fireBreath: {
       id: "fireBreath",
       name: "火の息",
-      power: 12,
+      power: 15,
       pp: 3,
       accuracy: 1.0,
       target: "allEnemies",
       element: "fire",
       effect: "burst",
+      se: "fireBreath",
       // 息は広がるのでよけようがない。回避率を持つ相手にも必ず当たる
       evadable: false,
       // 範囲全体の技は会心を出さない。
@@ -192,6 +208,7 @@
       target: "enemy",
       element: "none",
       effect: "impact",
+      se: "bodyPress",
       description: "全体重をかけてのしかかる。重い一撃だが、消費するPPも大きい。"
     },
 
@@ -210,17 +227,18 @@
       description: "相手に噛みついて血を吸う。与えたダメージの3割ぶん、自分のHPが戻る。"
     },
 
-    // 竜だけが使う範囲技。火の息（威力12/PP3）の一段上に置いてある。
+    // 竜だけが使う範囲技。火の息と同じ枠（威力15/PP3）で、属性だけが違う。
     // 範囲技の方針どおり、よけられず・会心も出ない
     abyssBreath: {
       id: "abyssBreath",
       name: "奈落の息",
-      power: 12,
+      power: 15,
       pp: 3,
       accuracy: 1.0,
       target: "allEnemies",
       element: "dark",
       effect: "burst",
+      se: "darkBreath",
       evadable: false,
       canCritical: false,
       description: "底なしの闇を吐き出し、相手全体を呑み込む。よけることはできない。"
@@ -282,13 +300,91 @@
       modifier: {
         duration: 3,
         message: "{target} の 攻める力が 落ちた!",
-        // 攻撃はダメージ式で「× 0.75」される側なので、倍率がそのまま効く。
+        // 攻撃はダメージ式で係数を掛けられる側（通常攻撃 0.75・技 0.40）なので、倍率がそのまま効く。
         // 防御と違って引き算ではないため、こうかのような補強は要らない
         effects: [
           { type: "statMultiplier", stat: "attack", value: 0.8 }
         ]
       },
       description: "相手にからみついて力を奪い、しばらく攻撃を下げる。"
+    },
+
+    /**
+     * --- 状態異常をあたえる技 ---
+     *
+     * 書き方はバフ／デバフ（modifier）と同じ考え方で、1行足すだけ。
+     *   status: { id: "poison", chance: 0.6 }
+     * 通る確率は、ここに書いた chance に相手の耐性が掛かる
+     * （data/statuses.js の説明を参照。耐性10で無効、5で半減）。
+     *
+     * ★ 属性は無属性にしてある。
+     *   毒に効く属性は無いので、属性耐性で通ったり通らなかったりすると
+     *   何が効いているのか分からなくなる。通りやすさは statusResist だけで決める。
+     */
+
+    // 単体に毒。威力8は基本技（15）の半分ほどで、
+    // 「殴るためではなく毒を入れるための技」という位置づけ
+    venomSting: {
+      id: "venomSting",
+      name: "どくばり",
+      power: 8,
+      pp: 2,
+      accuracy: 1.0,
+      target: "enemy",
+      element: "none",
+      effect: "impact",
+      se: "venomSting",
+      status: { id: "poison", chance: 0.6 },
+      description: "毒を含んだ針で刺す。高い確率で相手を毒におかす。"
+    },
+
+    // 全体に毒。ダメージは無く、毒を撒くことだけが役目。
+    // 息の技なので、火の息・奈落の息と同じくよけられない
+    venomBreath: {
+      id: "venomBreath",
+      name: "どくのいき",
+      power: 0,
+      pp: 3,
+      accuracy: 1.0,
+      target: "allEnemies",
+      element: "none",
+      effect: "burst",
+      se: "venomBreath",
+      // 息は広がるのでよけようがない（範囲技の方針）
+      evadable: false,
+      canCritical: false,
+      // 1体ずつ判定するので、避ける子・かかる子が分かれる。
+      // 単体（60%）より低いのは、3体に届くぶんの釣り合い
+      status: { id: "poison", chance: 0.35 },
+      description: "毒の息を吐き、相手全体を毒におかす。ダメージは与えないが、よけられない。"
+    },
+
+    /**
+     * あわ。ヌシガエルが使う水の範囲技。
+     *
+     * 火の息・奈落の息と同じ枠（PP3 / 全体 / よけられない / 会心なし）。
+     * 水属性の範囲技はこれが初めてで、火・闇に続く3つ目の「息」枠になる。
+     * ★ 威力だけ12のまま（火の息・奈落の息は15に上げた）。主の技なので別枠で見ている
+     *
+     * ★ 主のローテで効くのはこれ。
+     *   通常攻撃（威力0・単体）を1回撃つより、全体に届くぶん
+     *   1ターンあたりのダメージ総量が3倍近くになる。
+     *   「攻撃」ばかりのローテだと主が弱くなるのは、単体×威力0を繰り返すため
+     */
+    bubble: {
+      id: "bubble",
+      name: "あわ",
+      power: 12,
+      pp: 3,
+      accuracy: 1.0,
+      target: "allEnemies",
+      element: "water",
+      effect: "burst",
+      se: "bubble",
+      // 泡は広がって割れるのでよけようがない（範囲技の方針）
+      evadable: false,
+      canCritical: false,
+      description: "毒を含んだ泡を吐き散らし、相手全体を包む。よけることはできない。"
     },
 
     // 光の大技。サンダーと同じ「特別枠」で、威力を上げてPPを重くしてある
@@ -303,7 +399,8 @@
       accuracy: 1.0,
       target: "enemy",
       element: "light",
-      effect: "flash",
+      effect: "radiance",   // 閃光（flash）の一段上。技が強くなったと分かる見せ方
+      se: "shine",
       description: "目を灼くほどの光を放つ。闇を頼る相手ほど深く突き刺さる。"
     },
 
@@ -321,6 +418,7 @@
       target: "enemy",
       element: "thunder",
       effect: "flash",
+      se: "thunder",
       description: "強い電気を落とす。威力は高いが、消費するPPも大きい。"
     }
   };

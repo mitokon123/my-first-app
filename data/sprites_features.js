@@ -12,6 +12,51 @@
 
   NS.extend("sprites", {
 
+    // --- 階段（data/ui.js の dungeon.stairsMark から参照） ---
+
+    /**
+     * 下へ降りる階段。
+     *
+     * ▼ 段は下へ行くほど「細く」「暗く」する
+     *   同じ幅の横線を積むと、はしごか横縞にしか見えない。
+     *   奥へ行くほど狭めると奥行きが出て、暗くすると
+     *   「下へ落ちていく穴」に見える。深淵という場所にも合う。
+     *
+     * ▼ 色は金色の系統のまま
+     *   以前は「▼」の記号を金色で描いていた。絵に変えても同じ色味にしてある。
+     *   今までどおり「金色のものが階段」と探せるように。
+     */
+    stairsDown: {
+      palette: {
+        ".": null,
+        "K": "#1a1408",   // 輪郭
+        "H": "#e8c86a",   // いちばん上の段（明るい）
+        "A": "#b89a48",
+        "D": "#8a7132",
+        "N": "#5c4a1f",
+        "V": "#332a12",
+        "W": "#150f05"    // いちばん下（奥の闇）
+      },
+      pixels: [
+        "................",
+        "KKKKKKKKKKKKKKKK",
+        "KHHHHHHHHHHHHHHK",
+        "KKKKKKKKKKKKKKKK",
+        ".KAAAAAAAAAAAAK.",
+        ".KKKKKKKKKKKKKK.",
+        "..KDDDDDDDDDDK..",
+        "..KKKKKKKKKKKK..",
+        "...KNNNNNNNNK...",
+        "...KKKKKKKKKK...",
+        "....KVVVVVVK....",
+        "....KKKKKKKK....",
+        ".....KWWWWK.....",
+        ".....KKKKKK.....",
+        "................",
+        "................"
+      ]
+    },
+
     // --- 仕掛けマス（data/features.js） ---
 
     chest: {

@@ -32,32 +32,6 @@
     return this.members.length >= this.maxSize;
   };
 
-  /** 戦闘に出る個体（先頭から数えて最初の戦闘不能でないもの） */
-  Party.prototype.getLead = function () {
-    for (var i = 0; i < this.members.length; i++) {
-      if (!this.members[i].isFainted()) return this.members[i];
-    }
-    return null;
-  };
-
-  /** 全員が戦闘不能か */
-  Party.prototype.isWipedOut = function () {
-    if (this.members.length === 0) return true;
-    for (var i = 0; i < this.members.length; i++) {
-      if (!this.members[i].isFainted()) return false;
-    }
-    return true;
-  };
-
-  /** 戦える個体の数 */
-  Party.prototype.countAlive = function () {
-    var count = 0;
-    for (var i = 0; i < this.members.length; i++) {
-      if (!this.members[i].isFainted()) count++;
-    }
-    return count;
-  };
-
   // --- 変更 ---
 
   /**
@@ -86,14 +60,6 @@
     var tmp = this.members[a];
     this.members[a] = this.members[b];
     this.members[b] = tmp;
-    return true;
-  };
-
-  /** 指定の仲間を先頭へ移動する */
-  Party.prototype.moveToFront = function (index) {
-    if (index <= 0 || index >= this.members.length) return false;
-    var target = this.members.splice(index, 1)[0];
-    this.members.unshift(target);
     return true;
   };
 

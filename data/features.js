@@ -40,6 +40,7 @@
       color: "#ffd75e",
       hidden: false,
       once: true,
+      se: "chest",   // 使ったときの音（data/audio.js の se）。書かなければ無音
       // ここに書くのは「どのダンジョンでも出る中身」だけ。
       // その場所でしか出ない素材は data/dungeons.js の featureTables に書く
       //（上書きではなく追加されるので、下の3つはどこでも出続ける）
@@ -64,6 +65,7 @@
       hidden: false,
       once: true,
       confirm: true,   // 元気なうちに使ってしまわないよう、使うかどうかを選べる
+      se: "spring",
       effect: { type: "heal", hpRatio: 0.5, ppRatio: 0.5 }
     },
 
@@ -76,6 +78,7 @@
       color: "#e8542a",
       hidden: true,     // 踏むまで見えない
       once: true,
+      se: "trap",
       effect: { type: "damage", hpRatio: 0.12, leaveAtLeast: 1 }
     }
   };

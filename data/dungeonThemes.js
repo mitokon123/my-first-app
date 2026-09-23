@@ -115,6 +115,48 @@
           minDriftX: -3, maxDriftX: 3
         }
       }
+    },
+
+    /**
+     * 腐食の毒沼。深淵の王が沈んでいた、そのさらに下。
+     *
+     * ★ 坑道（mine）と同じ緑にしないこと。
+     *   坑道は「湿った岩と苔」の落ち着いた深緑（壁 #3a4a3c）。
+     *   ここは「体に悪い」黄緑に振ってある（壁 #4a5a2e）。
+     *   並べると別の場所だと分かるよう、彩度と黄色みで差をつけた。
+     *
+     * 毒がここから出るので、見ただけで「長居したくない」と思える色にしている。
+     */
+    venom: {
+      name: "澱んだ毒沼",
+      background: "#070a04",
+      tiles: {
+        wall:   "#4a5a2e",
+        floor:  "#16200f",
+        stairs: "#3a4a22"
+      },
+      // 階段だけは毒々しい黄緑にして、沼の中でも見つけやすくする
+      stairsMark: { color: "#c8e05a" },
+      decorations: {
+        count: { min: 10, max: 16 },
+        table: [
+          // 苔と骨。沼に沈んだものが覗いている、という見立て
+          { sprite: "decoMoss",   weight: 1.0 },
+          { sprite: "decoBone",   weight: 0.7 },
+          { sprite: "decoPebble", weight: 0.4 }
+        ]
+      },
+      // 戦闘の背景：澱んだ黄緑。毒の胞子がゆっくり昇る（坑道より濃く・多い）
+      battle: {
+        gradientTop: "#24331a",
+        gradientBottom: "#070a04",
+        groundY: 346, groundColor: "#101806", edgeColor: "#4a6b28",
+        particles: {
+          count: 34, color: "#b8d94a", minSize: 1, maxSize: 2.5,
+          minSpeed: -16, maxSpeed: -5, minAlpha: 0.10, maxAlpha: 0.38,
+          minDriftX: -6, maxDriftX: 6
+        }
+      }
     }
   };
 })(window.MyGame);

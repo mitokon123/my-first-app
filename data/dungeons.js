@@ -229,7 +229,21 @@
               { species: "kageZuta",    weight: 0.22 },
               { species: "puddling",    weight: 0.20 },
               { species: "boltBug",     weight: 0.18 },
-              { species: "abyssDragon", weight: 0.16 }
+              // ★ 竜は「特殊な出方」をする。
+              //   solo: true    … 引かれたら、その1体だけの戦いになる。
+              //                   出会う確率は変わらず、変わるのは体数だけ。
+              //                   竜＋雑魚2体は推奨レベル16で勝率33%、竜2体は13%だった。
+              //                   単体なら97%なので、そこだけを外している。
+              //   statMultiplier … 単体でしか出ないぶん、1体としては手強くする。
+              //                    HP・攻撃・守りを揃えて上げてある（門番としての格）。
+              //   actionPattern … 主と同じ「決まった順番」で動く。
+              //                   闇の息（全体）→ 噛みつく → 通常攻撃 の3手で一巡。
+              //                   読めれば「息の番だけ守る」という戦い方ができる。
+              //   ※ statMultiplier も actionPattern も、仲間にすると外れる
+              { species: "abyssDragon", weight: 0.16,
+                solo: true,
+                statMultiplier: { hp: 2.25, attack: 1.25, defense: 1.25 },
+                actionPattern: ["abyssBreath", "bite", "normalAttack"] }
             ]
           }
         }
@@ -242,11 +256,97 @@
           { item: "twistedVine",   weight: 0.30, min: 1, max: 1 },
           { item: "stormWing",     weight: 0.22, min: 1, max: 1 },
           { item: "slimeShard",    weight: 0.35, min: 1, max: 2 },
-          // 竜の鱗だけは渋くしてある。倒して手に入れることに意味を残すため
+          // 黄泉竜の鱗だけは渋くしてある。倒して手に入れることに意味を残すため
           { item: "dragonScale",   weight: 0.12, min: 1, max: 1 }
         ]
       },
       boss: "abyssKing"
+    },
+
+    /**
+     * 腐食の毒沼（ステージ4）。
+     *
+     * ★ ここが「毒」の場所。
+     *   状態異常は毒だけをここで出す（麻痺・眠りなどはステージ5以降）。
+     *   歩くだけで毒が削ってくるので、解毒草（深層クリアで店に並ぶ）が要る。
+     *   ＝ 深層をクリアすると「薬が買えるようになる」と「毒の場所が開く」が同時に起きる。
+     *
+     * ★ 深淵の王を倒すと、底が抜けてさらに下へ道が開ける、という位置づけ。
+     *   「静寂の深層＝いちばん底」だったので、その先を出すための筋立て。
+     *
+     * ▼ 強さの合わせ方
+     *   推奨Lv20。敵の上限は19で「推奨−1」にそろえてある（深層と同じ形）。
+     *   在来種の基礎値はステージ3とほぼ同じ帯に置き、格はレベルと成長率で出している
+     *   （data/monsters.js の在来種のコメントを参照）。
+     */
+    venomMarsh: {
+      id: "venomMarsh",
+      order: 4,
+      region: "abyss",
+      name: "腐食の毒沼",
+      theme: "venom",
+      subtitle: "底が抜けた先の沼。空気そのものが毒を含む。",
+      description: "深淵の王が沈んでいた、そのさらに下。\n" +
+                   "底の抜けた先に、澱んだ沼が広がっている。\n" +
+                   "空気そのものが毒を含み、立っているだけで蝕まれる。",
+      // ★ 3階。亀裂・深層（4階）より短い。
+      //   歩くだけで毒が削ってくる場所なので、長いと「削られに行くだけの階」が増える。
+      //   そのぶん1階ごとの密度を上げてある（B2Fから2体、B3Fは主の直前）。
+      //   加護は1階降りるごとなので、ここで選べるのは2回（深層は3回）
+      floors: 3,
+      unlockedBy: "silentDepths",
+      // 沼なので、深層より部屋を大きく・数を少なくして「開けた場所」にする
+      generation: { width: 25, height: 18, roomMin: 4, roomMax: 9, roomCount: 6, attempts: 200 },
+      // 推奨レベルは20。敵はそれより少し下に置く（深層と同じ考え方）
+      encounter: {
+        rate: 0.09,
+        groupSize: { min: 2, max: 3 },
+        levelRange: { min: 14, max: 19 },
+        // 在来種だけが出る。深層の魔物（ヨドミ・カゲヅタなど）はここには残していない。
+        // 重みの合計を 1.00 にしてあるので、数字がそのまま出現率になる
+        //   ドクバチ 42% / ドロガメ 33% / ヌマボネ 25%
+        table: [
+          { species: "venomBee",  weight: 0.42 },
+          { species: "mudTurtle", weight: 0.33 },
+          { species: "marshBone", weight: 0.25 }
+        ],
+        // 3階しかないので、階ごとの役割をはっきり分けてある
+        perFloor: {
+          // 浅場。軽く当たって沼に慣れる階
+          "1": { levelRange: { min: 14, max: 17 }, groupSize: { min: 1, max: 2 } },
+          // ドロガメが増える。壁役が2体並ぶので、削り切る手段が要る階
+          "2": {
+            levelRange: { min: 14, max: 19 },
+            groupSize: { min: 2, max: 2 },
+            table: [
+              { species: "venomBee",  weight: 0.36 },
+              { species: "mudTurtle", weight: 0.40 },
+              { species: "marshBone", weight: 0.24 }
+            ]
+          },
+          // 主の直前。深層B4Fと同じく、体数を重み付きにして重くなりすぎないようにする
+          "3": {
+            levelRange: { min: 17, max: 19 },
+            groupSize: [
+              { count: 1, weight: 0.4 },
+              { count: 2, weight: 0.4 },
+              { count: 3, weight: 0.2 }
+            ]
+          }
+        }
+      },
+      // 沼の宝箱。倒して集めるのと同じ素材が、探索でも手に入る。
+      // 毒嚢（主のドロップ）は入れない —— 主を倒すこと自体に意味を残すため
+      featureTables: {
+        chest: [
+          { item: "venomStinger", weight: 0.40, min: 1, max: 2 },
+          { item: "rustedBone",   weight: 0.32, min: 1, max: 1 },
+          { item: "muddyShell",   weight: 0.26, min: 1, max: 1 },
+          // 解毒草は沼の中でこそ要る。買い忘れても拾える逃げ道として置いてある
+          { item: "antidote",     weight: 0.30, min: 1, max: 1 }
+        ]
+      },
+      boss: "swampLord"
     }
   };
 })(window.MyGame);

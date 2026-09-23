@@ -6,6 +6,11 @@
  * ▼ 流れ
  *   盤面の味方ぜんいんの行動を決める → 素早さの大きい順に全員が行動 → 結果を表示
  *
+ * ▼ 倒れた仲間の扱い
+ *   倒れても自動では控えと入れ替わらない（BattleSystem の枠を参照）。
+ *   次のターン、その枠は「交代」だけを選べる。控えがいなければ飛ばす。
+ *   交代した瞬間（その出来事を見せたとき）に、絵・HP・PP も入った者のものに変わる。
+ *
  * ▼ 状態（this.phase）
  *   "command" … 何をするか選ぶ
  *   "skill"   … 技を選ぶ
@@ -42,6 +47,8 @@
     this.allowFlee = options.allowFlee !== false;
     this.scoutLevel = options.scoutLevel;
     this.introMessage = options.introMessage || null;
+    // この戦いだけ別の曲にしたいとき（主ごとの曲など）。省略で場面の既定
+    this.bgmId = options.bgm || null;
 
     var ui = game.data.ui || {};
     this.theme = ui.theme || {};
@@ -94,7 +101,7 @@
     this.scoutSystem = new NS.ScoutSystem(game.data, random);
     this.dropSystem = new NS.DropSystem(game.data, random);
     this.itemUsage = new NS.ItemUsage(game.data);
-    this.formatter = new NS.BattleMessageFormatter(game.data.messages);
+    this.formatter = new NS.BattleMessageFormatter(game.data.messages, game.data.statuses);
 
     this.phase = "message";
     this.commandIndex = 0;   // いま行動を決めている味方（盤面の番号）
@@ -111,6 +118,16 @@
     // 実際の効果（monster.modifiers）より遅れて増減する（_shownModifiersFor を参照）
     this.shownModifiers = [];
 
+    // 初めての場面で出る説明（出ているあいだは行動を決められない）
+    this.tutorial = new NS.TutorialBox(this.panel, game);
+    // 「この項目です」と矢印で指せるように、コマンド欄の位置を教える係を渡す。
+    // 並びは場面で変わる（スカウトや交代が出たり出なかったり）ので、
+    // 位置ではなく value で引く
+    var scene = this;
+    this.tutorial.setTargetResolver(function (pointAt) {
+      return scene.commandMenu.rectOfValue(pointAt);
+    });
+
     // 技以外の行動は、正しい行動順のタイミングでここに処理が回ってくる
     var self = this;
     this.system.onNonSkillAction = function (step, events) {
@@ -118,7 +135,23 @@
     };
   }
 
+  /**
+   * この戦いで流す曲のid。
+   * 開いた側の指定（主ごとの bgm）> 主の共通曲 > ふつうの戦闘曲 の順。
+   * 逃げられない相手＝主、で見分けている。
+   *
+   * ★ 曲は enter より前、出会いの演出が始まる瞬間に鳴らしたい
+   *   （DungeonScene._enterBattle）。そのために外から引けるようにしてある
+   */
+  BattleScene.prototype.getBgmId = function () {
+    return this.bgmId || (this.allowFlee ? "battle" : "boss");
+  };
+
   BattleScene.prototype.enter = function () {
+    // 演出の頭で鳴らし始めているので、ふつうはここでは何もしない
+    // （同じidなら鳴らし直さない）。演出なしで開かれたときの保険
+    this.game.audio.playBgm(this.getBgmId());
+
     this.system.start(this.allies, this.enemies);
     this._assignEnemyLabels();
     this._recordEnemiesSeen();
@@ -189,8 +222,27 @@
 
   // --- メニュー構築 ---
 
+  /**
+   * いま行動を決めている仲間のコマンド欄を組む。
+   * 並びは仲間ごとに変わる（倒れていれば交代だけ）ので、番が移るたびに組み直す。
+   */
   BattleScene.prototype._buildCommandMenu = function () {
     var labels = (this.game.data.messages || {}).command || {};
+    var actor = this._currentActor();
+    var hasReserve = this._reserveMembers().length > 0;
+
+    // 倒れている仲間にできるのは「交代」だけ。
+    // ただし交代しない選択も要る（控えを温存したい・倒れた本人を戻したい）ので、
+    // 「そのまま」を並べて次の仲間の番へ進めるようにしてある。
+    // 控えがいないときは自動で飛ばされるので、ここには来ない（_canChoose）
+    if (actor && actor.isFainted()) {
+      this.commandMenu.setItems([
+        { label: labels.swap || "swap", value: "swap" },
+        { label: labels.skip || "skip", value: "skip" }
+      ]);
+      return;
+    }
+
     var items = [
       { label: labels.attack || "attack", value: "attack" },  // 通常攻撃（技を選ばず即対象選択）
       { label: labels.fight  || "fight",  value: "fight" },   // 技を選ぶ
@@ -199,13 +251,28 @@
 
     if (this.allowScout) items.push({ label: labels.scout || "scout", value: "scout" });
     // 控えがいるときだけ「交代」を出す（選べない項目を並べない）
-    if (this._reserveMembers().length > 0) {
-      items.push({ label: labels.swap || "swap", value: "swap" });
-    }
+    if (hasReserve) items.push({ label: labels.swap || "swap", value: "swap" });
     items.push({ label: labels.item || "item", value: "item" });
-    if (this.allowFlee) items.push({ label: labels.flee || "flee", value: "flee" });
+    // 状態を見る（行動にはならない。見終わるとここへ戻る）
+    items.push({ label: labels.inspect || "inspect", value: "inspect" });
+    // 「逃げる」はここには無い。ターンの頭の「戦う／逃げる」で選ぶ
 
     this.commandMenu.setItems(items);
+  };
+
+  /**
+   * ターンの頭のメニュー「戦う／逃げる」。
+   * 主戦は「逃げる」を薄く出して選べないようにする（無いのではなく、できないと分かるように）。
+   */
+  BattleScene.prototype._buildTurnMenu = function () {
+    var labels = (this.game.data.messages || {}).command || {};
+    var t = this.theme;
+
+    this.commandMenu.setItems([
+      { label: labels.go   || "go",   value: "go" },
+      { label: labels.flee || "flee", value: "flee",
+        disabled: !this.allowFlee, color: this.allowFlee ? null : t.hintColor }
+    ]);
   };
 
   /** 「攻撃」コマンドで使う技id（data/battle.js） */
@@ -244,20 +311,32 @@
   };
 
   /**
-   * 控えにいる仲間。盤面に出ておらず、まだ倒れていない者。
+   * 控えにいる仲間。盤面の枠におらず、まだ倒れていない者。
    * 倒れている仲間は前に出せない。
+   * このターンに別の仲間が「この者と交代」と決めた相手も外す
+   * （2つの枠が同じ控えを選ぶと、あとの交代が成り立たない）。
    */
   BattleScene.prototype._reserveMembers = function () {
-    var field = this.system.getFieldAllies();
+    var slots = this.system.getFieldSlots();
     var members = this._partyMembers();
     var reserves = [];
 
     for (var i = 0; i < members.length; i++) {
-      if (field.indexOf(members[i]) >= 0) continue;
+      if (slots.indexOf(members[i]) >= 0) continue;
       if (members[i].isFainted && members[i].isFainted()) continue;
+      if (this._chosenAsIncoming(members[i])) continue;
       reserves.push(members[i]);
     }
     return reserves;
+  };
+
+  /** このターンの決定済みの行動の中で、もう交代先に選ばれているか */
+  BattleScene.prototype._chosenAsIncoming = function (member) {
+    for (var i = 0; i < this.actions.length; i++) {
+      var action = this.actions[i];
+      if (action && action.type === "swap" && action.incoming === member) return true;
+    }
+    return false;
   };
 
   /** 交代先の候補を並べる */
@@ -315,10 +394,19 @@
     this.skillEffects.update(this.game.clock);
     if (this.sceneryParticles) this.sceneryParticles.update(scaled);
 
+    // 説明を出している間は戦闘を止める。
+    // 演出だけは上で進めてあるので、読み終われば続きから動く
+    if (this.tutorial.isActive()) {
+      this.tutorial.handleInput(input);
+      return;
+    }
+
     switch (this.phase) {
       case "playback": this._updatePlayback(scaled, input); break;
       case "message":  this._updateMessage(input); break;
+      case "turnMenu": this._updateTurnMenu(input); break;
       case "command":  this._updateCommand(input); break;
+      case "inspect":  this._updateInspect(input); break;
       case "skill":    this._updateSkill(input); break;
       case "swap":     this._updateSwap(input); break;
       case "item":     this._updateItem(input); break;
@@ -448,42 +536,131 @@
         // 会心のときは会心用の見た目にする
         this._applyStyle(event.critical ? "critical" : "damage",
           event.target, String(event.amount));
+        // 打撃か斬撃かは演出の型で決まる。会心も同じ音（専用の音は付けない、と決めてある）。
+        // 出した瞬間の音を持つ技は null が返り、当たった音は鳴らさない
+        var hitSe = this._hitSeFor();
+        if (hitSe) this.game.audio.playSe(hitSe);
         // HPバーが動き切るまでは次の出来事へ進まない
         wait = Math.max(wait, this.animator.drainTime(event.amount));
         break;
       case "miss":
         this._applyStyle("miss", event.target, "MISS");
+        this.game.audio.playSe("miss");
         break;
       case "effective":
         this._applyStyle("effective", event.target, null);
         break;
+      // いまひとつは音なし（当たった音だけ鳴る）
       case "resisted":
         this._applyStyle("resisted", event.target, null);
         break;
+      // 無効・状態異常が効かなかったのは「当たらなかった」の仲間として外れの音
       case "immune":
         this._applyStyle("immune", event.target, "0");
+        this.game.audio.playSe("miss");
+        break;
+      case "statusImmune":
+      case "statusMiss":
+        this.game.audio.playSe("miss");
         break;
       case "faint":
         this._applyStyle("faint", event.target, null);
+        // 即死で倒れたときは、直前の即死の音が倒れる音を兼ねる（音を持つ状態異常が原因なら鳴らさない）
+        if (!this._statusSeOf(event.statusId)) this.game.audio.playSe("faint");
+        break;
+      // 状態異常に掛かった瞬間。音は data/statuses.js の se（無ければ無音）
+      case "status":
+        this._playStatusSe(event.statusId);
+        break;
+      // ターン終了時の毒ダメージ。攻撃のダメージと同じく、見せた瞬間にHPバーを減らす
+      case "statusDamage":
+        this.animator.revealTo(event.target, event.currentHp);
+        this._applyStyle("statusDamage", event.target, String(event.amount));
+        this._playStatusSe(event.statusId);
+        wait = Math.max(wait, this.animator.drainTime(event.amount));
         break;
       // 効果は takeTurn の時点でもう掛かっているが、
       // 印は「その出来事を見せた瞬間」に出す（HPバーと同じ考え方）
       case "modifier":
         this._revealModifier(event);
+        this.game.audio.playSe(event.raised ? "buff" : "debuff");
         break;
       case "modifierEnd":
         this._hideModifier(event);
         break;
+      // レベルアップで覚えた技を図鑑へ。
+      // BattleSystem は Game を知らないので、記録は画面側で行う
+      case "skillLearned":
+        this.game.discovery.markSkillLearned(event.skillId);
+        break;
+      // 初めてレベルが上がったときの説明。
+      // ここで出すと、レベルアップの演出が出ている画面のまま読める。
+      // update が説明を見つけると再生を止めるので、読み終わってから続きが動く
+      case "levelUp":
+        this.game.audio.playSe("levelUp");
+        if (this.game.tutorial) {
+          this.tutorial.show(this.game.tutorial.take("levelUp"));
+        }
+        break;
+      // 勝ったら戦闘曲をやめて、勝利の曲を流す（繰り返さない。data/audio.js）。
+      // 探索へ戻ると探索曲に置き換わる
+      case "battleEnd":
+        if (event.result === "win") this.game.audio.playBgm("victory");
+        else if (event.result === "lose") this.game.audio.playBgm("lose");
+        break;
+      // 逃げる音は「逃げようとした」音。失敗しても鳴る
+      case "fleeSuccess":
+      case "fleeFailed":
+        this.game.audio.playSe("flee");
+        break;
       default:
-        // 道具などによる回復
+        // 画面側が組み立てた出来事に音がついていれば、見せた瞬間に鳴らす
+        if (event.se) this.game.audio.playSe(event.se);
+        // 交代を見せた瞬間に、画面の並びも入れ替える
+        if (event.swapIn) this._showSwap(event);
+        // HPの回復（技・道具・吸血）。音が付いている出来事（道具）は上で鳴らしたので重ねない
         if (event.healAmount) {
           this._applyStyle("heal", event.revealTarget, "+" + event.healAmount);
+          if (!event.se) this.game.audio.playSe("heal");
           wait = Math.max(wait, this.animator.drainTime(event.healAmount));
         }
         break;
     }
 
     this.playbackTimer = wait;
+  };
+
+  /**
+   * 当たったときの音のid。無ければ null（鳴らさない）。
+   *
+   * 出した瞬間の音（skill.se）を持つ技は、当たったときの打撃音を重ねない。
+   * ファイアの炎の音のあとに「ドン」と殴る音が来るのは変なので、技の音だけで完結させる。
+   * それ以外（通常攻撃・体当たり・噛みつく など）は演出の型（data/effects.js の shapes）の
+   * hitSe、無ければ hit（打撃）。通常攻撃は種族の attackEffect で型が決まるので、斬る種族は斬撃音になる。
+   * 技に hitSe を書けば、この判断を上書きできる（"hit" で鳴らす、null で止める）。
+   */
+  BattleScene.prototype._hitSeFor = function () {
+    var skill = this._currentSkill;
+    if (!skill) return "hit";
+    if (skill.hitSe !== undefined) return skill.hitSe;
+    if (skill.se) return null;
+    var effectId = this._effectIdFor(skill, this._currentSkillActor);
+    var shapes = (this.game.data.effects || {}).shapes || {};
+    var shape = effectId ? shapes[effectId] : null;
+    return (shape && shape.hitSe) || "hit";
+  };
+
+  /** 状態異常の効果音のid（data/statuses.js の se）。無ければ null */
+  BattleScene.prototype._statusSeOf = function (statusId) {
+    if (!statusId) return null;
+    var def = this.game.data.getStatus ? this.game.data.getStatus(statusId) : null;
+    return (def && def.se) ? def.se : null;
+  };
+
+  /** 状態異常の効果音を鳴らす。書いていない状態異常は無音 */
+  BattleScene.prototype._playStatusSe = function (statusId) {
+    var se = this._statusSeOf(statusId);
+    if (se) this.game.audio.playSe(se);
   };
 
   /**
@@ -616,6 +793,8 @@
     // 技を出した時点で覚えておき、当たった出来事で使う
     if (event.type === "useSkill") {
       this._currentSkill = event.skill || null;
+      // 技ごとの音（data/skills.js の se）。書いていない技は、当たったときの hit だけが鳴る
+      if (event.skill && event.skill.se) this.game.audio.playSe(event.skill.se);
       // 名前に注意：_currentActor は「いま行動を決めている味方」を返すメソッド。
       // 同じ名前で値を入れるとメソッドを潰してしまう（実際に一度やって戦闘が壊れた）
       this._currentSkillActor = event.actor || null;
@@ -800,7 +979,73 @@
       this.phase = "done";
       return;
     }
-    this._beginCommandPhase();
+    this._beginTurnMenu();
+  };
+
+  // --- ターンの頭：戦う／逃げる ---
+
+  /**
+   * 毎ターンの頭に「戦う／逃げる」を出す。
+   * 「戦う」で仲間ごとのコマンドへ。「逃げる」は全員ぶんの行動を逃走にして、そのまま解決する。
+   */
+  BattleScene.prototype._beginTurnMenu = function () {
+    this.commandIndex = 0;
+    this.actions = [];
+    this._buildTurnMenu();
+    this.phase = "turnMenu";
+
+    // 初めての戦闘：「戦う／逃げる」の説明（コマンドの説明は「戦う」を選んでから）
+    if (this.game.tutorial) this.tutorial.show(this.game.tutorial.take("turnMenu"));
+  };
+
+  BattleScene.prototype._updateTurnMenu = function (input) {
+    var result = this.commandMenu.handleInput(input);
+    if (!result) return;
+
+    if (result.type === "disabled") {
+      this._flashMessage(this.texts.cannotFlee);
+      return;
+    }
+    if (result.type !== "confirm") return;
+
+    if (result.value === "flee") {
+      // 逃走はターン全体の行動。誰かひとりでも選べば判定されるが、
+      // 失敗したときに他の仲間が動かないよう、全員ぶんを逃走にする
+      var slots = this.system.getFieldSlots();
+      this.actions = [];
+      for (var i = 0; i < slots.length; i++) this.actions.push({ type: "flee" });
+      this._resolveTurn();
+      return;
+    }
+    if (result.value === "go") this._beginCommandPhase();
+  };
+
+  // --- 状態を見る ---
+
+  /**
+   * 盤面の全員（味方→敵の順）を1体ずつ見る。行動にはならない。
+   * 見始めるのは、いま行動を決めている仲間から。
+   */
+  BattleScene.prototype._beginInspect = function () {
+    this._inspectList = this.system.getFieldSlots().concat(this.system.getFieldEnemies());
+    this._inspectIndex = Math.max(0, this._inspectList.indexOf(this._currentActor()));
+    this.phase = "inspect";
+  };
+
+  BattleScene.prototype._updateInspect = function (input) {
+    var count = this._inspectList.length;
+    if (count > 0) {
+      if (input.isPressed("left") || input.isPressed("up")) {
+        this._inspectIndex = (this._inspectIndex - 1 + count) % count;
+      }
+      if (input.isPressed("right") || input.isPressed("down")) {
+        this._inspectIndex = (this._inspectIndex + 1) % count;
+      }
+    }
+    // 決定でも取り消しでも戻る（見るだけの画面なので、どちらでも同じ）
+    if (input.isPressed("cancel") || input.isPressed("confirm") || this._clickedScreen(input)) {
+      this.phase = "command";
+    }
   };
 
   // --- パーティがいっぱいのときのスカウト ---
@@ -955,29 +1200,104 @@
     return source || [];
   };
 
-  /** ターンの初めに、盤面の味方の行動を順に決めていく */
+  /** ターンの初めに、盤面の枠の行動を順に決めていく */
   BattleScene.prototype._beginCommandPhase = function () {
     this.commandIndex = 0;
     this.actions = [];
-    this._buildCommandMenu();
     this.phase = "command";
+
+    // 決められる枠が1つも無ければ、そのままターンが進む
+    if (this._advanceChooser()) return;
+
+    this._buildCommandMenu();
+    this._showTurnTutorials();
   };
 
-  /** いま行動を決めている味方 */
+  /**
+   * 行動を決められない枠（倒れていて、控えもいない）を飛ばす。
+   * 全部の枠が済んだらターンを解決する。
+   * @returns {boolean} ターンを解決したか
+   */
+  BattleScene.prototype._advanceChooser = function () {
+    var slots = this.system.getFieldSlots();
+
+    while (this.commandIndex < slots.length && !this._canChoose(slots[this.commandIndex])) {
+      // 自動で飛ばした印。取り消しで戻るときの戻り先にしないため
+      this.actions.push({ type: "skip", auto: true });
+      this.commandIndex++;
+    }
+
+    if (this.commandIndex >= slots.length) {
+      this._resolveTurn();
+      return true;
+    }
+    return false;
+  };
+
+  /** その枠に決めることがあるか。倒れていても、控えがいれば交代を選べる */
+  BattleScene.prototype._canChoose = function (actor) {
+    if (!actor) return false;
+    if (!actor.isFainted()) return true;
+    return this._reserveMembers().length > 0;
+  };
+
+  /**
+   * ターンの頭に出す説明。
+   *
+   * ★ 戦闘の始まりではなく**ここ**で出す。
+   *   コマンド欄が画面に出ているのはこの瞬間からで、
+   *   「この項目です」と矢印で指すには、指す相手が見えていないといけない。
+   *   読んだ直後にそのコマンドを選べる、という点でも都合がよい。
+   */
+  BattleScene.prototype._showTurnTutorials = function () {
+    var tutorial = this.game.tutorial;
+    if (!tutorial) return;
+
+    // 初めての戦闘。コマンドを1つずつ指しながら説明する
+    var steps = tutorial.take("battleStart");
+
+    if (this._anyEnemyWeak()) steps = steps.concat(tutorial.take("enemyWeak"));
+    if (this._anyAllyHasStatus()) steps = steps.concat(tutorial.take("poisoned"));
+
+    this.tutorial.show(steps);
+  };
+
+  /** スカウトを教えるころあいか（盤面に弱った敵がいるか） */
+  BattleScene.prototype._anyEnemyWeak = function () {
+    // スカウトできない相手（主のうち条件を満たしていないもの）では教えない
+    if (!this.allowScout) return false;
+
+    var field = this.system.getFieldEnemies();
+    for (var i = 0; i < field.length; i++) {
+      if (field[i].isFainted()) continue;
+      if (field[i].currentHp / field[i].getMaxHp() <= 0.5) return true;
+    }
+    return false;
+  };
+
+  /** 盤面の味方に状態異常が掛かっているか */
+  BattleScene.prototype._anyAllyHasStatus = function () {
+    var field = this.system.getFieldAllies();
+    for (var i = 0; i < field.length; i++) {
+      var defs = field[i].getStatusDefs ? field[i].getStatusDefs() : [];
+      if (defs.length > 0) return true;
+    }
+    return false;
+  };
+
+  /** いま行動を決めている枠の仲間（倒れていることもある） */
   BattleScene.prototype._currentActor = function () {
-    return this.system.getFieldAllies()[this.commandIndex] || null;
+    return this.system.getFieldSlots()[this.commandIndex] || null;
   };
 
   BattleScene.prototype._updateCommand = function (input) {
     var result = this.commandMenu.handleInput(input);
     if (!result) return;
 
-    // 取り消しで前の仲間の選択に戻る
+    // 取り消しで前の仲間の選択に戻る。最初の仲間なら「戦う／逃げる」へ戻る
     if (result.type === "cancel") {
-      if (this.commandIndex > 0) {
-        this.commandIndex--;
-        this.actions.pop();
-      }
+      if (this._isFirstChooser()) this._beginTurnMenu();
+      else this._backToPreviousChooser();
       return;
     }
     if (result.type !== "confirm") return;
@@ -1016,10 +1336,22 @@
         }
         this.phase = "item";
         break;
-      case "flee":
-        this._commitAction({ type: "flee" });
+      case "inspect":
+        this._beginInspect();
+        break;
+      // 倒れている仲間の枠で「そのまま」。何もせず次の仲間の番へ
+      case "skip":
+        this._commitAction({ type: "skip" });
         break;
     }
+  };
+
+  /** いま決めているのが、このターン最初に決める仲間か（自動で飛ばした枠は数えない） */
+  BattleScene.prototype._isFirstChooser = function () {
+    for (var i = 0; i < this.actions.length; i++) {
+      if (!this.actions[i] || !this.actions[i].auto) return false;
+    }
+    return true;
   };
 
   BattleScene.prototype._updateSkill = function (input) {
@@ -1143,27 +1475,65 @@
    */
   BattleScene.prototype._beginTargetSelect = function (side, returnPhase) {
     this.targetSide = side;
-    this.targetIndex = 0;
     this.targetReturnPhase = returnPhase || "command";
     this.phase = "target";
+
+    // 先頭が倒れていることがある（味方側）ので、狙える最初の相手から始める
+    var candidates = this._targetCandidates();
+    this.targetIndex = 0;
+    if (candidates.length > 0 && !this._canTarget(candidates[0])) {
+      this.targetIndex = this._nextTargetIndex(candidates, 0, 1);
+    }
+  };
+
+  /**
+   * 狙える相手の並び。画面に並んでいる順そのもの。
+   * 味方側は枠ごと（倒れた仲間も並ぶ）にしてある。
+   * 生きている者だけにすると、絵の位置と番号がずれてしまう
+   */
+  BattleScene.prototype._targetCandidates = function () {
+    return (this.targetSide === "enemy")
+      ? this.system.getFieldEnemies()
+      : this.system.getFieldSlots();
+  };
+
+  /**
+   * その相手に、いま決めている行動を向けられるか（倒れた仲間には向けられない）。
+   * ★ 蘇生の技・道具を足すときは、ここで this.pending の種類を見て、
+   *   その行動のときだけ倒れた仲間も許すようにする
+   */
+  BattleScene.prototype._canTarget = function (monster) {
+    return !!monster && !monster.isFainted();
+  };
+
+  /** 狙える相手まで、向き（+1 / -1）へ進めた番号。ぐるっと回っても無ければそのまま */
+  BattleScene.prototype._nextTargetIndex = function (candidates, from, direction) {
+    var count = candidates.length;
+    for (var step = 1; step <= count; step++) {
+      var index = (from + direction * step + count) % count;
+      if (this._canTarget(candidates[index])) return index;
+    }
+    return from;
   };
 
   BattleScene.prototype._updateTarget = function (input) {
-    var candidates = (this.targetSide === "enemy")
-      ? this.system.getFieldEnemies()
-      : this.system.getFieldAllies();
+    var candidates = this._targetCandidates();
 
+    // 相手は横一列に並んでいるので、左右で選ぶ。
+    // 上下でも動くようにしてあるのは、コマンドを上下で選んだ直後に
+    // 手が同じ動きをしても「反応しない」と感じずに済むため
     if (candidates.length > 0) {
-      if (input.isPressed("up")) {
-        this.targetIndex = (this.targetIndex - 1 + candidates.length) % candidates.length;
+      if (input.isPressed("left") || input.isPressed("up")) {
+        this.targetIndex = this._nextTargetIndex(candidates, this.targetIndex, -1);
       }
-      if (input.isPressed("down")) {
-        this.targetIndex = (this.targetIndex + 1) % candidates.length;
+      if (input.isPressed("right") || input.isPressed("down")) {
+        this.targetIndex = this._nextTargetIndex(candidates, this.targetIndex, 1);
       }
     }
 
     // マウス：相手に重ねると狙いが移り、押すとその相手に決まる
     var hovered = this._hoveredMember(input, this.targetSide, candidates.length);
+    if (hovered >= 0 && !this._canTarget(candidates[hovered])) hovered = -1;
     if (hovered >= 0) this.targetIndex = hovered;
 
     if (input.isPressed("cancel")) {
@@ -1173,6 +1543,8 @@
 
     var clicked = hovered >= 0 && input.getPointer && input.getPointer().clicked;
     if (!input.isPressed("confirm") && !clicked) return;
+    // 狙える相手が1人もいないときは決められない
+    if (!this._canTarget(candidates[this.targetIndex])) return;
 
     var action = this.pending || {};
     action.targetIndex = this.targetIndex;
@@ -1180,6 +1552,23 @@
     // 並びがずれても狙った相手を攻撃できるよう、個体そのものも覚えておく
     action.target = candidates[this.targetIndex] || null;
     this._commitAction(action);
+  };
+
+  /**
+   * 取り消しで、前に決めた仲間へ戻る。
+   * 自動で飛ばした枠（倒れていて控えもいない）は戻り先にならない。
+   */
+  BattleScene.prototype._backToPreviousChooser = function () {
+    if (this.commandIndex <= 0) return;
+
+    while (this.commandIndex > 0) {
+      this.commandIndex--;
+      var popped = this.actions.pop();
+      if (!popped || !popped.auto) break;
+    }
+    // 先頭まで戻ってもそこが飛ばす枠なら、決められる枠まで進め直す
+    if (this._advanceChooser()) return;
+    this._buildCommandMenu();
   };
 
   /** 1体分の行動を確定し、全員決まったらターンを解決する */
@@ -1199,17 +1588,18 @@
       return;
     }
 
-    if (this.commandIndex < this.system.getFieldAllies().length) {
-      this.phase = "command";
-      return;
-    }
-    this._resolveTurn();
+    // 次に決められる枠へ。無ければここでターンが解決される
+    if (this._advanceChooser()) return;
+
+    this.phase = "command";
+    this._buildCommandMenu();
   };
 
   /** 全員の行動を素早さ順に解決し、その結果を1つずつ見せる */
   BattleScene.prototype._resolveTurn = function () {
-    // 計算前の並びを控えておく（倒れた相手も演出中はその場に残すため）
-    this.snapshotAllies = this.system.getFieldAllies();
+    // 計算前の並びを控えておく（倒れた相手も演出中はその場に残すため）。
+    // 味方は枠を写す。交代を見せた瞬間に、この写しの中身を入れ替える（_showSwap）
+    this.snapshotAllies = this.system.getFieldSlots().slice();
     this.snapshotEnemies = this.system.getFieldEnemies();
 
     // 計算前のHPも控えておく。計算はここで一気に終わるので、
@@ -1280,11 +1670,14 @@
   };
 
   /**
-   * 交代する。並びの中で位置を入れ替えるだけ。
+   * 交代する。
    *
-   * 盤面に出るのはパーティの先頭から battleFieldSize 体なので、
-   * 出ている者と控えの者を入れ替えれば、そのまま前後が入れ替わる。
+   * 盤面の枠（BattleSystem.slots）の中身を入れ替え、
+   * パーティの並びも同じように入れ替える（戦闘後もこの並びで残る）。
    * 交代した本人はこのターン動かない（交代が行動そのもの）。
+   *
+   * 出来事には出ていく者と入る者を持たせる。
+   * 画面はこの出来事を見せた瞬間に、絵・HP・PPを入った者のものに切り替える（_showSwap）
    */
   BattleScene.prototype._resolveSwapAction = function (step, events) {
     var party = this.allySource;
@@ -1300,18 +1693,36 @@
     var from = members.indexOf(outgoing);
     var to = members.indexOf(incoming);
 
-    if (from < 0 || to < 0 || !party.swap(from, to)) {
+    if (from < 0 || to < 0 || !this.system.replaceSlot(outgoing, incoming)) {
       events.push({ type: "custom", text: this.texts.swapFailed });
       return;
     }
+    party.swap(from, to);
 
-    events.push({ type: "custom", text: fill(this.texts.swapped,
-      { out: outgoing.getName(), "in": incoming.getName() }) });
+    events.push({
+      type: "custom",
+      text: fill(this.texts.swapped, { out: outgoing.getName(), "in": incoming.getName() }),
+      swapOut: outgoing, swapIn: incoming
+    });
+  };
+
+  /**
+   * 交代の出来事を見せた瞬間に、画面の並びを入れ替える。
+   * こうしないと、演出が終わるまで下がった者の絵とHPが残ってしまう。
+   */
+  BattleScene.prototype._showSwap = function (event) {
+    var view = this.viewAllies;
+    if (!view) return;
+
+    var index = view.indexOf(event.swapOut);
+    if (index >= 0) view[index] = event.swapIn;
   };
 
   BattleScene.prototype._resolveItemAction = function (step, events) {
     var action = step.action;
-    var target = this.system.getFieldAllies()[action.targetIndex]
+    // 選んだ個体そのものを優先する（番号は枠の番号で、倒れた枠が混ざる）
+    var target = action.target
+              || this.system.getFieldSlots()[action.targetIndex]
               || this.system.getFieldAllies()[0];
     if (!target) return;
 
@@ -1319,17 +1730,29 @@
       { actor: step.actor.getName(), item: action.itemName }) });
 
     var result = this.itemUsage.use(action.itemId, target, this.game.inventory);
-    if (result.success) {
-      events.push({
-        type: "custom",
-        text: fill(this.texts.itemHealed, { name: target.getName(), amount: result.amount }),
-        // 回復もこのメッセージの瞬間にHPバーへ反映する
-        revealTarget: target, revealHp: target.currentHp,
-        healAmount: result.amount
-      });
-    } else {
+    if (!result.success) {
       events.push({ type: "custom", text: this.texts.itemNoEffect });
+      return;
     }
+
+    // 文は効果の種類ごとに違う（HP回復・PP回復・状態異常を治す）
+    var healed = this.texts.itemHealed || {};
+    var template = healed[result.effectType] || healed.default || "";
+    // 回復の音は、HP・PP・状態異常のどれを治しても同じ
+    var event = {
+      type: "custom",
+      text: fill(template, { name: target.getName(), amount: result.amount }),
+      se: "heal"
+    };
+
+    // 緑の回復表示とHPバーの反映は、HPを回復したときだけ。
+    // 解毒草でHPが増えたように見せてはいけない
+    if (NS.ItemUsage.healsHp(result.effectType)) {
+      event.revealTarget = target;
+      event.revealHp = target.currentHp;
+      event.healAmount = result.amount;
+    }
+    events.push(event);
   };
 
   /**
@@ -1396,16 +1819,16 @@
     target.displaySuffix = null;
     target._removed = false;
     target._defending = false;
-    target._onField = false;
     this.system.finishWith("scouted");
     if (texts.battleEnd) events.push({ type: "custom", text: texts.battleEnd });
   };
 
-  /** 選択中に一時的なメッセージだけ出す（行動は決めない） */
+  /** 選択中に「できない」と知らせるメッセージだけ出す（行動は決めない）。決定音の代わりに失敗の音 */
   BattleScene.prototype._flashMessage = function (text) {
     if (!text) return;
     this.messageLog.push(text);
     this.messageLog.advance();
+    if (this.game.playError) this.game.playError();
   };
 
   BattleScene.prototype._showNextMessage = function () {
@@ -1418,6 +1841,16 @@
    * onFinish が true を返した場合は「呼び出し側が遷移を処理した」とみなす。
    */
   BattleScene.prototype._updateDone = function () {
+    // 初めて勝ったときの締めのひとこと。
+    // 画面を移る前に出す（移ってしまうと、この戦いの流れから切り離される）
+    if (this.system.getResult() === "win" && this.game.tutorial) {
+      var steps = this.game.tutorial.take("battleWon");
+      if (steps.length > 0) {
+        this.tutorial.show(steps);
+        return;   // 読み終わるまで待つ。次のフレームでここへ戻ってくる
+      }
+    }
+
     var handled = this.onFinish ? this.onFinish(this.system.getResult()) : false;
     if (!handled) this.game.scenes.change(this.returnScene);
   };
@@ -1485,6 +1918,8 @@
     this.skillEffects.render(ctx, this.game.clock);
 
     if (this.phase === "command") this._renderCommand();
+    else if (this.phase === "turnMenu") this._renderTurnMenu();
+    else if (this.phase === "inspect") this._renderInspect();
     else if (this.phase === "skill" || this.phase === "item" || this.phase === "swap") {
       this._renderSubMenu();
     }
@@ -1501,6 +1936,9 @@
 
     // 発光は画面全体に重ねる
     this.screenEffects.renderOverlay(ctx, w, h);
+
+    // 説明はすべての上。読んでいる間は他を触れない
+    this.tutorial.render();
   };
 
   /**
@@ -1508,7 +1946,7 @@
    * 演出中は開始時の並びを使い、倒れた相手もその場に残して見せる。
    */
   BattleScene.prototype._viewAllies = function () {
-    return this.viewAllies || this.system.getFieldAllies();
+    return this.viewAllies || this.system.getFieldSlots();
   };
   BattleScene.prototype._viewEnemies = function () {
     return this.viewEnemies || this.system.getFieldEnemies();
@@ -1620,7 +2058,10 @@
     this.panel.drawBox(rect);
 
     var origin = this.panel.innerOrigin(rect);
-    this.panel.drawText(monster.getName(), origin.x, origin.y + 10, { font: t.smallFont });
+    // 倒れて枠に残っている仲間は、名前を薄くして「いま戦えない」と分かるようにする
+    var fallen = (side === "ally") && shownHp <= 0 && monster.isFainted();
+    this.panel.drawText(monster.getName(), origin.x, origin.y + 10,
+      { font: t.smallFont, color: fallen ? t.hintColor : undefined });
 
     // 掛かっている強化・弱体を名前の横に出す
     this._renderModifierMarks(monster, origin, origin.y + 10);
@@ -1718,78 +2159,75 @@
   };
 
   /**
-   * 掛かっているバフ／デバフを、名前のうしろに短い印で出す。
-   * 上がるものは緑、下がるものは赤。
+   * 掛かっている状態異常とバフ／デバフを、名前のうしろに絵で出す。
+   * バフ／デバフはステータスの絵に矢印を重ねる（上がった＝緑、下がった＝赤）。
    *
-   * 枠が狭いので「何が」「どちらへ」だけを出し、
-   * 倍率までは出さない（技の説明を見れば分かるため）。
+   * 枠が狭いので「何が」「どちらへ」だけを出し、倍率もターン数も出さない。
+   * 詳しくはコマンドの「状態を見る」で見られる。
    */
   BattleScene.prototype._renderModifierMarks = function (monster, origin, baseY) {
     var mods = this._shownModifiersFor(monster);
-    if (mods.length === 0) return;
+    var statuses = this._shownStatusesFor(monster);
+    if (mods.length === 0 && statuses.length === 0) return;
 
     var t = this.theme;
     var ctx = this.panel.ctx;
     var font = t.smallFont || "12px monospace";
+    var data = this.game.data;
 
     ctx.font = font;
     var x = origin.x + ctx.measureText(monster.getName()).width + 8;
 
+    // 状態異常を先に出す。バフ／デバフより重いので、名前のすぐ隣に置く
+    x = NS.StatusMarks.draw(this.panel, statuses, x, baseY,
+      { font: font, sprites: this.spriteRenderer, data: data, gap: 2 });
+
     for (var i = 0; i < mods.length; i++) {
       var mark = this._modifierMark(mods[i]);
-      if (!mark.text) continue;
+      if (!mark.stat) continue;
 
-      this.panel.drawText(mark.text, x, baseY, { font: font, color: mark.color });
-      ctx.font = font;   // drawText がフォントを変えるので測る前に戻す
-      x += ctx.measureText(mark.text).width + 4;
+      x = NS.StatusMarks.drawModifier(this.panel, this.spriteRenderer, data,
+        mark.stat, mark.up, x, baseY) + 2;
     }
   };
 
   /**
-   * 効果1つを「防↑」のような短い印にする。
-   * 文字は data/messages.js の battleUi、色は theme から取る。
+   * 印として見せている状態異常。
+   *
+   * バフ／デバフ（_shownModifiersFor）と違って、こちらは個体をそのまま見ている。
+   * 状態異常は「掛かった瞬間」も「毒で削れる瞬間」も出来事として1つずつ見せるので、
+   * 印だけ先に出てしまう心配が無い。
+   */
+  BattleScene.prototype._shownStatusesFor = function (monster) {
+    return (monster && monster.getStatusDefs) ? monster.getStatusDefs() : [];
+  };
+
+  /**
+   * バフ／デバフ1つを「どのステータスが」「上がったか下がったか」に要約する。
+   * 絵は data/ui.js の icons.stats から、この stat で引く。
+   * @returns {{stat:string|null, up:boolean}}
    */
   BattleScene.prototype._modifierMark = function (mod) {
-    var t = this.theme;
-    var marks = this.texts.statMarks || {};
-    var effects = (mod && mod.effects) || [];
-
-    for (var i = 0; i < effects.length; i++) {
-      var e = effects[i];
-      var up = null;
-      var label = null;
-
-      if (e.type === "statMultiplier") { up = e.value > 1; label = marks[e.stat]; }
-      else if (e.type === "statBonus")  { up = e.value > 0; label = marks[e.stat]; }
-      // 与ダメージ・被ダメージは、上がり下がりの向きが逆になることに注意
-      else if (e.type === "damageDealt") { up = e.value > 1; label = this.texts.markOther; }
-      else if (e.type === "damageTaken") { up = e.value < 1; label = this.texts.markOther; }
-
-      if (label === null || label === undefined) continue;
-
-      return {
-        text: label + (up ? (this.texts.markUp || "↑") : (this.texts.markDown || "↓")),
-        color: up ? (t.hpBarHigh || "#5fd18c") : (t.hpBarLow || "#e8542a")
-      };
-    }
-    return { text: "", color: t.subTextColor };
+    return NS.StatusMarks.summarizeModifier(mod);
   };
 
   /** 行動を決めている味方や、選択中の対象に印をつける */
   BattleScene.prototype._renderMemberMarkers = function (monster, rect, side, index) {
     var t = this.theme;
 
-    // いま行動を決めている味方
+    // いま行動を決めている味方（「戦う／逃げる」の間はまだ誰も決めていない）
     var choosing = (side === "ally")
-      && this.phase !== "message" && this.phase !== "done"
+      && this.phase !== "message" && this.phase !== "done" && this.phase !== "turnMenu"
       && index === this.commandIndex;
     if (choosing) {
       this.panel.drawText("▼", rect.x + rect.w / 2, rect.y - 6,
         { align: "center", color: t.cursorColor });
     }
 
-    // 選択中の対象
-    if (this.phase === "target" && side === this.targetSide && index === this.targetIndex) {
+    // 選択中の対象。状態を見ているときは、見ている相手
+    var framed = (this.phase === "target" && side === this.targetSide && index === this.targetIndex)
+      || (this.phase === "inspect" && this._inspectList[this._inspectIndex] === monster);
+    if (framed) {
       this.panel.ctx.strokeStyle = t.cursorColor || "#ffd75e";
       this.panel.ctx.lineWidth = 2;
       this.panel.ctx.strokeRect(rect.x - 2, rect.y - 2, rect.w + 4, rect.h + 4);
@@ -1805,13 +2243,135 @@
     this.panel.drawBox(rect);
     var origin = this.panel.innerOrigin(rect);
     if (actor) {
-      this.panel.drawText(fill(this.texts.commandFor, { name: actor.getName() }),
+      // 倒れている枠は「どうする?」ではなく、倒れていることを伝える
+      var template = actor.isFainted() ? this.texts.commandFainted : this.texts.commandFor;
+      this.panel.drawText(fill(template, { name: actor.getName() }),
         origin.x, origin.y + 20);
     }
     this.panel.drawText(this.texts.hintCommand || "", origin.x, rect.y + rect.h - 14,
       { font: this.theme.smallFont, color: this.theme.hintColor });
 
     this.commandMenu.render(this.game.clock);
+  };
+
+  /** ターンの頭の「戦う／逃げる」。左に問いかけ、右にメニュー */
+  BattleScene.prototype._renderTurnMenu = function () {
+    var rect = this.layout.message;
+    this.panel.drawBox(rect);
+
+    var origin = this.panel.innerOrigin(rect);
+    this.panel.drawText(this.texts.turnPrompt || "", origin.x, origin.y + 20);
+    this.panel.drawText(this.texts.hintTurn || "", origin.x, rect.y + rect.h - 14,
+      { font: this.theme.smallFont, color: this.theme.hintColor });
+
+    this.commandMenu.render(this.game.clock);
+  };
+
+  /**
+   * 「状態を見る」。見ている相手のHP・PPと、掛かっている状態異常・バフ／デバフを
+   * 残りターンつきで並べる。何も掛かっていなければそう書く。
+   */
+  BattleScene.prototype._renderInspect = function () {
+    var t = this.theme;
+    var rect = this.layout.message;
+    var L = this.layout.inspect || {};
+    var lh = L.lineHeight || 20;
+    var iconSize = L.iconSize || 16;
+    var texts = this.texts;
+    var data = this.game.data;
+
+    this.panel.drawBox(rect);
+    var origin = this.panel.innerOrigin(rect);
+    var monster = this._inspectList[this._inspectIndex];
+    if (!monster) return;
+
+    // 左：名前・HP・PP
+    var x = origin.x;
+    var y = origin.y + 20;
+    var isAlly = this.system.getFieldSlots().indexOf(monster) >= 0;
+    this.panel.drawText(monster.getName(), x, y, { color: t.cursorColor });
+    y += lh;
+    this.panel.drawText("HP " + monster.currentHp + "/" + monster.getMaxHp(), x, y,
+      { font: t.smallFont, color: t.subTextColor });
+    y += lh;
+    if (isAlly) {
+      this.panel.drawText("PP " + monster.currentPp + "/" + monster.getMaxPp(), x, y,
+        { font: t.smallFont, color: t.subTextColor });
+      y += lh;
+    }
+
+    // 右：状態異常とバフ／デバフ
+    var cx = origin.x + (L.columnX || 300);
+    var cy = origin.y + 20;
+    var lines = this._inspectLines(monster);
+    if (lines.length === 0) {
+      this.panel.drawText(texts.inspectNone || "", cx, cy, { color: t.hintColor, font: t.smallFont });
+    }
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var tx = cx;
+      if (line.icon) {
+        NS.StatusMarks.drawIcon(this.spriteRenderer, line.icon, tx, cy, iconSize);
+        tx += iconSize + 4;
+      } else if (line.stat) {
+        tx = NS.StatusMarks.drawModifier(this.panel, this.spriteRenderer, data,
+          line.stat, line.up, tx, cy, { size: iconSize }) + 4;
+      }
+      this.panel.drawText(line.text, tx, cy, { font: t.smallFont, color: line.color || t.textColor });
+      if (line.right) {
+        this.panel.drawText(line.right, rect.x + rect.w - (t.padding || 8) - 10, cy,
+          { align: "right", font: t.smallFont, color: t.subTextColor });
+      }
+      cy += lh;
+    }
+
+    this.panel.drawText(texts.hintInspect || "", origin.x, rect.y + rect.h - 14,
+      { font: t.smallFont, color: t.hintColor });
+  };
+
+  /**
+   * 状態を見る：1体ぶんの行。状態異常 → バフ／デバフ の順。
+   * @returns {Array<{text, right?, icon?, stat?, up?, color?}>}
+   */
+  BattleScene.prototype._inspectLines = function (monster) {
+    var texts = this.texts;
+    var t = this.theme;
+    var data = this.game.data;
+    var lines = [];
+    var i;
+
+    var statuses = (monster.statusEffects || []);
+    for (i = 0; i < statuses.length; i++) {
+      var def = data.getStatus ? data.getStatus(statuses[i].id) : null;
+      if (!def) continue;
+      var remaining = statuses[i].remaining;
+      lines.push({
+        icon: def.icon || null,
+        text: def.name,
+        color: def.color || t.textColor,
+        right: (remaining === null || remaining === undefined)
+          ? (texts.turnsLasting || "")
+          : fill(texts.turnsLeft || "{n}", { n: remaining })
+      });
+    }
+
+    var mods = monster.modifiers || [];
+    for (i = 0; i < mods.length; i++) {
+      var mark = NS.StatusMarks.summarizeModifier(mods[i]);
+      var desc = [];
+      var effects = mods[i].effects || [];
+      for (var e = 0; e < effects.length; e++) {
+        var text = NS.EffectSystem.describeEffect(effects[e], data);
+        if (text) desc.push(text);
+      }
+      lines.push({
+        stat: mark.stat, up: mark.up,
+        text: mods[i].name + "  " + desc.join(" / "),
+        color: mark.up ? (t.hpBarHigh || "#5fd18c") : (t.hpBarLow || "#e8542a"),
+        right: fill(texts.turnsLeft || "{n}", { n: mods[i].remaining })
+      });
+    }
+    return lines;
   };
 
   BattleScene.prototype._renderSubMenu = function () {

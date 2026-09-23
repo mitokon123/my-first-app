@@ -6,7 +6,13 @@
  * ▼ 戦闘の流れ
  *   1. 盤面（味方・敵とも最大 battleFieldSize 体）に出ている全員の行動を決める
  *   2. 味方・敵をまとめて素早さの大きい順に並べ、その順で行動する
- *   3. 倒れた者が出たら、控えから盤面へ繰り上げる
+ *
+ * ▼ 味方の枠（slots）
+ *   味方の盤面は「枠」で持つ。開始時に戦える者を先頭から埋め、
+ *   以後は**倒れても自動では入れ替わらない**。倒れた枠はそのまま残り、
+ *   次のターンに交代コマンドで手動で入れ替える（倒れた枠は交代しか選べない）。
+ *   蘇生技を足すときに、勝手に入れ替わっていると戻す相手がいなくなるため。
+ *   倒れた枠の交代は、その枠に手番が無いので、だれよりも先に済ませる。
  *
  * ▼ 受け取るモンスターについて
  * 特定のクラスに依存しない。次のインターフェースを満たすオブジェクトなら何でもよい。
@@ -30,6 +36,7 @@
     this.effects = NS.EffectSystem ? new NS.EffectSystem(gameData) : null;
     this.allies = [];
     this.enemies = [];
+    this.slots = [];    // 味方の盤面の枠（倒れた者も残る）
     this.fieldSize = (gameData.config || {}).battleFieldSize || 3;
     this.finished = false;
     this.result = null; // "win" | "lose" | "flee" | その他（外部から終了させた場合）
@@ -37,7 +44,7 @@
 
   /**
    * 戦闘を開始する。
-   * @param {object[]} allies 味方（先頭から盤面に出る）
+   * @param {object[]} allies 味方（戦える者が先頭から盤面に出る）
    * @param {object[]} enemies 敵
    */
   BattleSystem.prototype.start = function (allies, enemies) {
@@ -46,6 +53,8 @@
     this.finished = false;
     this.result = null;
 
+    // 枠を埋めるのはこのときだけ。以後は交代（replaceSlot）でしか変わらない
+    this.slots = aliveMembers(this.allies, this.fieldSize);
     this._resetFieldMarks();
   };
 
@@ -56,29 +65,44 @@
    *   _removed   … 盤面から取り除かれた（スカウトで仲間になった等）
    *                 消し忘れると、その個体は次の戦闘以降ずっと行動しなくなる
    *   _defending … 防御中
-   *   _onField   … 盤面に出ている（控えから上がった者だけを知らせるために使う）
    */
   BattleSystem.prototype._resetFieldMarks = function () {
     var i;
     for (i = 0; i < this.allies.length; i++) {
       this.allies[i]._removed = false;
       this.allies[i]._defending = false;
-      this.allies[i]._onField = false;
     }
     for (i = 0; i < this.enemies.length; i++) {
       this.enemies[i]._removed = false;
       this.enemies[i]._defending = false;
     }
-
-    var field = this.getFieldAllies();
-    for (i = 0; i < field.length; i++) field[i]._onField = true;
   };
 
   // --- 盤面の参照 ---
 
-  /** 盤面に出ている味方（戦闘可能な先頭から fieldSize 体） */
+  /**
+   * 味方の枠。倒れた者もその場に残る。
+   * 行動を決める順・画面に並べる順はこれ。
+   */
+  BattleSystem.prototype.getFieldSlots = function () {
+    return this.slots;
+  };
+
+  /** 盤面に出ていて、まだ戦える味方（狙える・動ける者） */
   BattleSystem.prototype.getFieldAllies = function () {
-    return aliveMembers(this.allies, this.fieldSize);
+    return aliveMembers(this.slots, this.fieldSize);
+  };
+
+  /**
+   * 枠の中身を入れ替える（交代）。
+   * 出ていく者が枠にいない、入る者がもう枠にいる、のどちらかなら何もしない。
+   */
+  BattleSystem.prototype.replaceSlot = function (outgoing, incoming) {
+    var index = this.slots.indexOf(outgoing);
+    if (index < 0 || !incoming || this.slots.indexOf(incoming) >= 0) return false;
+
+    this.slots[index] = incoming;
+    return true;
   };
 
   /** 盤面に出ている敵 */
@@ -92,19 +116,26 @@
   // --- ターン進行 ---
 
   /**
-   * 盤面の味方全員の行動を受け取り、1ターン分を解決する。
+   * 味方の枠ごとの行動を受け取り、1ターン分を解決する。
    *
-   * @param {object[]} allyActions 盤面の味方と同じ並びの行動
+   * @param {object[]} slotActions 枠（getFieldSlots）と同じ並びの行動
    *   { type: "skill", skillId, targetIndex } … 技を使う（targetIndex は盤面の敵の番号）
    *   { type: "item",  itemId, targetIndex, targetSide } … 道具を使う（実際の効果は呼び出し側で適用済み）
    *   { type: "scout", targetIndex }  … スカウト（判定は呼び出し側）
+   *   { type: "swap",  incoming }     … 交代（入れ替えは呼び出し側）
    *   { type: "flee" }                … 逃走（1人でも選べば逃走判定を行う）
    *   { type: "skip" }                … 何もしない
    * @returns {object[]} 発生したイベントの配列
    */
-  BattleSystem.prototype.takeTurn = function (allyActions) {
+  BattleSystem.prototype.takeTurn = function (slotActions) {
     var events = [];
     if (this.finished) return events;
+
+    // 受け取った配列は触らない（済ませた交代を skip に置き換えるため写す）
+    var actions = (slotActions || []).slice();
+
+    // 倒れた枠の交代は、だれよりも先に済ませる（倒れた者に手番は無い）
+    this._applyFaintedSwaps(actions, events);
 
     var fieldAllies = this.getFieldAllies();
     var fieldEnemies = this.getFieldEnemies();
@@ -114,14 +145,14 @@
     }
 
     // 防御は前のターンの分を解除してから、このターンの分を設定する
-    this._applyDefend(fieldAllies, allyActions, events);
+    this._applyDefend(actions, events);
 
     // 「逃げる」は行動順の前にまとめて判定する
-    if (containsFlee(allyActions)) {
+    if (containsFlee(actions)) {
       if (this._tryFlee(events)) return events;
     }
 
-    var order = this._buildTurnOrder(fieldAllies, fieldEnemies, allyActions);
+    var order = this._buildTurnOrder(fieldAllies, fieldEnemies, actions);
 
     for (var i = 0; i < order.length; i++) {
       var step = order[i];
@@ -132,22 +163,34 @@
       if (this._checkFinish(events)) return events;
     }
 
-    // 状態異常のダメージ（毒）と、残りターンを減らす処理。
-    //
-    // ★ 繰り上げより「前」に置くこと。
-    //   あとに置くと、控えから繰り上げたあとで毒に倒れることになり、
-    //   その場が空いたまま次のターンへ進んでしまう。
+    // 状態異常のダメージ（毒）と、残りターンを減らす処理
     this._tickStatuses(events);
     if (this._checkFinish(events)) return events;
-
-    // 倒れた者がいれば控えから繰り上げる
-    this._refillField(events);
 
     // バフ／デバフの残りターンを1つ減らす（ターンの最後にまとめて）
     this._tickModifiers(events);
 
     this._checkFinish(events);
     return events;
+  };
+
+  /**
+   * 倒れている枠が選んだ交代を、行動順より前に済ませる。
+   * 済ませた枠の行動は skip に置き換える（入ってきた者はこのターン動かない）。
+   */
+  BattleSystem.prototype._applyFaintedSwaps = function (actions, events) {
+    for (var i = 0; i < this.slots.length; i++) {
+      var action = actions[i];
+      if (!action || action.type !== "swap") continue;
+
+      var actor = this.slots[i];
+      if (!actor.isFainted()) continue;   // 生きている者の交代は素早さ順のまま
+
+      if (this.onNonSkillAction) {
+        this.onNonSkillAction({ actor: actor, side: "ally", action: action }, events);
+      }
+      actions[i] = { type: "skip" };
+    }
   };
 
   /**
@@ -279,9 +322,10 @@
    *   このまま残す。防御以外も通したくなったら、ここで
    *   スカウト以外の味方の step も並べるようにすればよい。
    */
-  BattleSystem.prototype._buildTurnOrder = function (fieldAllies, fieldEnemies, allyActions) {
+  BattleSystem.prototype._buildTurnOrder = function (fieldAllies, fieldEnemies, actions) {
     var i;
     var enemySteps = [];
+    var slots = this.slots;
 
     for (i = 0; i < fieldEnemies.length; i++) {
       enemySteps.push({
@@ -292,21 +336,23 @@
     }
 
     // スカウトを選んだ味方がいれば、その1体だけが先に行動する
-    var scoutIndex = findScoutIndex(allyActions);
-    if (scoutIndex >= 0 && fieldAllies[scoutIndex]) {
+    var scoutIndex = findScoutIndex(actions);
+    if (scoutIndex >= 0 && slots[scoutIndex] && !slots[scoutIndex].isFainted()) {
       var scoutStep = {
-        actor: fieldAllies[scoutIndex], side: "ally",
-        action: allyActions[scoutIndex], speed: Infinity
+        actor: slots[scoutIndex], side: "ally",
+        action: actions[scoutIndex], speed: Infinity
       };
       return [scoutStep].concat(this._sortBySpeed(enemySteps));
     }
 
+    // 行動は枠ごとに受け取っている。倒れている枠は手番を持たない
     var steps = enemySteps;
-    for (i = 0; i < fieldAllies.length; i++) {
-      var action = (allyActions && allyActions[i]) || { type: "skip" };
+    for (i = 0; i < slots.length; i++) {
+      if (slots[i].isFainted()) continue;
+      var action = (actions && actions[i]) || { type: "skip" };
       steps.push({
-        actor: fieldAllies[i], side: "ally",
-        action: action, speed: this._rollSpeed(fieldAllies[i])
+        actor: slots[i], side: "ally",
+        action: action, speed: this._rollSpeed(slots[i])
       });
     }
 
@@ -486,18 +532,19 @@
    * 防御を設定し直す。
    * 前のターンの防御はここで解除されるので、効果は「選んだターンの間」だけ続く。
    */
-  BattleSystem.prototype._applyDefend = function (fieldAllies, allyActions, events) {
+  BattleSystem.prototype._applyDefend = function (actions, events) {
     var i;
     // まず全員の防御を解除する
     for (i = 0; i < this.allies.length; i++) this.allies[i]._defending = false;
     for (i = 0; i < this.enemies.length; i++) this.enemies[i]._defending = false;
 
-    for (i = 0; i < fieldAllies.length; i++) {
-      var action = allyActions && allyActions[i];
+    for (i = 0; i < this.slots.length; i++) {
+      var action = actions && actions[i];
       if (!action || action.type !== "defend") continue;
+      if (this.slots[i].isFainted()) continue;
 
-      fieldAllies[i]._defending = true;
-      events.push({ type: "defend", side: "ally", actorName: fieldAllies[i].getName() });
+      this.slots[i]._defending = true;
+      events.push({ type: "defend", side: "ally", actorName: this.slots[i].getName() });
     }
   };
 
@@ -524,6 +571,9 @@
   BattleSystem.prototype._performAction = function (step, events) {
     var action = step.action || { type: "skip" };
 
+    // 状態異常で動けないか（麻痺・眠り）。動けなければ、そこで手番が終わる
+    if (this._blockedByStatus(step, events)) return;
+
     // ようすをみる。何もしないが、何もしなかったと分かるようにする
     if (action.type === "wait") {
       events.push({ type: "wait", side: step.side, actorName: step.actor.getName() });
@@ -536,6 +586,9 @@
       if (this.onNonSkillAction) this.onNonSkillAction(step, events);
       return;
     }
+
+    // 封印。技は使えないが、通常攻撃はできる
+    if (this._sealedFrom(step, action, events)) return;
 
     var skill = this.data.getSkill(action.skillId);
 
@@ -553,6 +606,103 @@
     if (!target) return;
 
     this._performSkill(step.actor, target, action.skillId, step.side, events);
+  };
+
+  /**
+   * 状態異常で手番そのものを失うか（麻痺・眠り）。
+   *
+   * data/statuses.js の blocksTurn を見る。
+   *   "always" … 必ず動けない（眠り）
+   *   数値      … その確率で動けない（麻痺の0.5）
+   *
+   * 複数掛かっているときは、上から順に見て**最初に止めたものだけ**を知らせる。
+   * 「眠っている」と「しびれて動けない」が同時に並ぶと、何で止まったのか分からないため。
+   *
+   * @returns {boolean} 止められたか
+   */
+  BattleSystem.prototype._blockedByStatus = function (step, events) {
+    var actor = step.actor;
+    var defs = actor.getStatusDefs ? actor.getStatusDefs() : [];
+
+    for (var i = 0; i < defs.length; i++) {
+      var block = defs[i].blocksTurn;
+      if (block === undefined || block === null) continue;
+
+      var stopped = (block === "always") || (this.random.next() < block);
+      if (!stopped) continue;
+
+      events.push({
+        type: "statusBlocked", targetSide: step.side,
+        targetName: actor.getName(), target: actor,
+        statusId: defs[i].id, statusName: defs[i].name
+      });
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * 封印で、その技が使えないか。
+   *
+   * ★ 通常攻撃（data/battle.js の normalAttackSkill）は止めない。
+   *   「攻撃」はコマンドであって覚えた技ではないので、
+   *   これも封じると何もできない相手になってしまう。
+   *
+   * @returns {boolean} 止められたか
+   */
+  BattleSystem.prototype._sealedFrom = function (step, action, events) {
+    var actor = step.actor;
+    var normalId = (this.data.battle || {}).normalAttackSkill;
+    if (action.skillId === normalId) return false;
+
+    var defs = actor.getStatusDefs ? actor.getStatusDefs() : [];
+    for (var i = 0; i < defs.length; i++) {
+      if (!defs[i].blocksSkills) continue;
+
+      events.push({
+        type: "statusBlocked", targetSide: step.side,
+        targetName: actor.getName(), target: actor,
+        statusId: defs[i].id, statusName: defs[i].name
+      });
+      return true;
+    }
+    return false;
+  };
+
+  /**
+   * 命中率に掛かる倍率（盲目）。
+   * 属性耐性と同じで、引き算ではなく掛け算にそろえてある。
+   */
+  BattleSystem.prototype._accuracyMultiplier = function (actor) {
+    var defs = actor && actor.getStatusDefs ? actor.getStatusDefs() : [];
+    var total = 1;
+
+    for (var i = 0; i < defs.length; i++) {
+      if (typeof defs[i].accuracyMul === "number") total *= defs[i].accuracyMul;
+    }
+    return total;
+  };
+
+  /**
+   * 殴られて目を覚ますか（眠り）。
+   *
+   * ダメージを受けたときにだけ呼ぶ。
+   * 「起こしてしまうので殴れない」という読み合いを作るための仕掛け。
+   */
+  BattleSystem.prototype._wakeOnDamage = function (target, events) {
+    var defs = target && target.getStatusDefs ? target.getStatusDefs() : [];
+
+    for (var i = 0; i < defs.length; i++) {
+      var chance = defs[i].wakeOnDamage;
+      if (typeof chance !== "number") continue;
+      if (this.random.next() >= chance) continue;
+
+      target.removeStatus(defs[i].id);
+      events.push({
+        type: "statusEnd", targetName: target.getName(), target: target,
+        statusId: defs[i].id, statusName: defs[i].name
+      });
+    }
   };
 
   /**
@@ -701,8 +851,9 @@
     events.push({ type: "status", targetSide: targetSide,
       targetName: target.getName(), target: target,
       statusId: def.id, statusName: def.name, renewed: false });
+    // statusId は「何で倒れたか」。即死の音が倒れる音を兼ねるので、画面側はこれを見て faint の音を省く
     events.push({ type: "faint", targetSide: targetSide,
-      targetName: target.getName(), target: target });
+      targetName: target.getName(), target: target, statusId: def.id });
   };
 
   /**
@@ -839,6 +990,10 @@
       ? (battle.defaultAccuracy === undefined ? 1 : battle.defaultAccuracy)
       : skill.accuracy;
 
+    // 盲目などで命中率が下がる。
+    // このあとに回避判定がもう一度あることに注意（当たりにくさは2段構え）
+    accuracy *= this._accuracyMultiplier(actor);
+
     if (this.random.next() >= accuracy) {
       events.push({ type: "miss", side: side, targetName: target.getName(), target: target });
       return;
@@ -905,7 +1060,11 @@
 
     if (target.isFainted()) {
       events.push({ type: "faint", side: side, targetName: target.getName(), target: target });
+      return;
     }
+
+    // 殴られて目を覚ます（眠り）。倒れた相手には意味がないので、そのあとに置く
+    this._wakeOnDamage(target, events);
   };
 
   /**
@@ -941,8 +1100,11 @@
   /**
    * ダメージを計算する。式・数値は data/battle.js。
    *
-   *   基礎 = 攻撃力×attackFactor + 技威力×powerFactor - 防御力×defenseFactor
-   *   ダメージ = floor( max(0, 基礎) × 属性倍率 × 会心倍率 × 乱数 )
+   *   技      基礎 = 攻撃力×skill.attackFactor + 技威力×skill.powerFactor - 防御力×defenseFactor
+   *   通常攻撃 基礎 = 攻撃力×normal.attackFactor                          - 防御力×defenseFactor
+   *   ダメージ = floor( max(0, 基礎) × 属性倍率 × 会心倍率 × 防御 × 特性装備 × 乱数 )
+   *
+   * 「通常攻撃」は normalAttackSkill の技だけ。体当たりなどの無属性技は技の式。
    *
    * @returns {{damage:number, critical:boolean, elementMultiplier:number, immune:boolean}}
    */
@@ -955,8 +1117,10 @@
       return { damage: 0, critical: false, elementMultiplier: 0, immune: true };
     }
 
-    var attackFactor = numberOr(config.attackFactor, 1);
-    var powerFactor = numberOr(config.powerFactor, 1);
+    var isNormal = (skill.id === this.getNormalAttackId());
+    var factors = (isNormal ? config.normal : config.skill) || {};
+    var attackFactor = numberOr(factors.attackFactor, 1);
+    var powerFactor = numberOr(factors.powerFactor, 1);
     var defenseFactor = numberOr(config.defenseFactor, 0);
     var randomMin = numberOr(config.randomMin, 1);
     var randomMax = numberOr(config.randomMax, 1);
@@ -1075,17 +1239,6 @@
     return !element || !!element.physical;
   };
 
-  /** 倒れた者の代わりに、控えが盤面へ出てきたことを知らせる */
-  BattleSystem.prototype._refillField = function (events) {
-    var field = this.getFieldAllies();
-    for (var i = 0; i < field.length; i++) {
-      if (!field[i]._onField) {
-        field[i]._onField = true;
-        events.push({ type: "enterField", side: "ally", actorName: field[i].getName() });
-      }
-    }
-  };
-
   /** 逃走を試みる。成功したら戦闘終了して true */
   BattleSystem.prototype._tryFlee = function (events) {
     var rate = (this.data.battle || {}).fleeSuccessRate || 0;
@@ -1189,6 +1342,9 @@
           var skill = this.data.getSkill(gained.learned[k]);
           events.push({
             type: "skillLearned", actorName: ally.getName(),
+            // 図鑑に「覚えた」と記録するのは画面側なので、idも渡す
+            // （BattleSystem は Game を知らないまま済ませたい）
+            skillId: gained.learned[k],
             skillName: skill ? skill.name : gained.learned[k]
           });
         }

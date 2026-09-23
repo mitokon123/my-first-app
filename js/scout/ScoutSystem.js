@@ -55,7 +55,12 @@
 
   /**
    * 応じてくれるかどうかの判定だけを行う（どこにも加えない）。
-   * 受け取り先がいっぱいで、加える先を呼び出し側で決めたい場合に使う。
+   *
+   * ★ 加えるところまで一度にやる関数は置かない。
+   *   パーティがいっぱいでも判定は行い、応じてくれたら行き先
+   *   （入れ替える／逃がす／拠点に送る）を選んでもらう仕様のため、
+   *   「判定」と「加える」は必ず別の手順になる。加えるのは join()。
+   *
    * @param {object} target 誘う相手
    * @param {object} [options] { item }
    * @returns {{success:boolean, reason:string, rate:number, target:object}}
@@ -70,31 +75,6 @@
       rate: rate,
       target: target
     };
-  };
-
-  /**
-   * スカウトを試み、成功したら受け取り先へ加える。
-   * @param {object} target 誘う相手
-   * @param {object[]|MyGame.Party} receiver 受け取り先。
-   *   add()/isFull() を持つもの（Party）でも、素の配列でも受け取れる。
-   * @param {object} [options] { item, capacity }
-   * @returns {{success:boolean, reason:string, rate:number, target:object}}
-   *   reason: "joined" | "refused" | "full"
-   */
-  ScoutSystem.prototype.tryScout = function (target, receiver, options) {
-    options = options || {};
-
-    // 受け取り先がいっぱいなら判定せず失敗
-    if (this.isFull(receiver, options.capacity)) {
-      return {
-        success: false, reason: "full",
-        rate: this.calcRate(target, options.item), target: target
-      };
-    }
-
-    var result = this.roll(target, options);
-    if (result.success) this._addTo(receiver, target);
-    return result;
   };
 
   /**

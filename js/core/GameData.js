@@ -32,6 +32,9 @@
     this.recipes   = raw.recipes   || {}; // 工房で作れるもの
     this.blessings = raw.blessings || {}; // 階を降りるたびに選ぶ加護
     this.patchnotes = raw.patchnotes || {}; // 更新履歴（タイトル画面で表示）
+    this.help      = raw.help      || {}; // 遊び方（よくある質問と答え）
+    this.tutorial  = raw.tutorial  || {}; // 初めての場面で出る説明
+    this.audio     = raw.audio     || {}; // BGMと効果音の一覧
     this.home      = raw.home      || {}; // 拠点メニューの項目
     this.player    = raw.player    || {}; // プレイヤーの初期状態
     this.save      = raw.save      || {}; // セーブの設定

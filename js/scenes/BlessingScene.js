@@ -106,8 +106,30 @@
 
     this._renderHeading(w);
     for (var i = 0; i < this.choices.length; i++) this._renderCard(i);
+    this._renderShortNote(w);
     this._renderOwned();
     this._renderHint();
+  };
+
+  /**
+   * 選択肢が満たなかったときの断り書き。
+   *
+   * 枠は「等級を引いてから、その等級の加護を選ぶ」順で作るので、
+   * 引いた等級を1つも編成していないと枠が空になる（BlessingSystem を参照）。
+   * 何も言わずに2つしか出さないと不具合に見えるので、理由をその場に出す。
+   * ＝「絞り込みすぎている」と気づける唯一の場所。
+   */
+  BlessingScene.prototype._renderShortNote = function (w) {
+    var full = (((this.game.data.run || {}).blessing) || {}).choiceCount || 3;
+    if (this.choices.length >= full) return;
+
+    var note = this.texts.fewChoices;
+    if (!note) return;
+
+    // いちばん下のカードの少し下に置く（カードの数で位置が変わる）
+    var rect = this._cardRect(Math.max(0, this.choices.length - 1));
+    this.panel.drawText(note, w / 2, rect.y + rect.h + 26,
+      { align: "center", font: this.theme.smallFont, color: this.theme.hintColor });
   };
 
   BlessingScene.prototype._renderHeading = function (w) {

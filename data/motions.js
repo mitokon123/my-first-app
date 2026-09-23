@@ -260,6 +260,35 @@
       offsetX: { amplitude: 1.0,    period: 2200, phase: 0.25 }
     },
 
+    // --- 腐食の毒沼 ---
+
+    // ドクバチ：羽ばたきで小刻みに上下する。虫なのでいちばん速い周期
+    beeHover: {
+      offsetY: { amplitude: -1.6, period: 260 },
+      offsetX: { amplitude: 0.6,  period: 620 }
+    },
+
+    // ドロガメ：甲羅は動かさず、ゆっくり息をするだけ。
+    // 足元を基準に縦だけ伸縮させるので、甲羅が浮いて見えない
+    turtleBreathe: {
+      scaleY: { amplitude: 0.016, period: 3400 }
+    },
+
+    // ヌマボネ：泥に浮いたまま、ゆらりと傾く。
+    // 上下ではなく左右に揺らすと「沈んでいて動けない」感じが出る
+    boneSway: {
+      offsetX: { amplitude: 1.4,   period: 3000 },
+      offsetY: { amplitude: -1.0,  period: 1500 },
+      alpha:   { amplitude: -0.05, period: 3800 }
+    },
+
+    // ヌシガエル：大きいものほどゆっくり深く息をする。
+    // 横に広い体なので、縦より横をわずかに大きく動かす
+    lordBreathe: {
+      scaleX: { amplitude: 0.020, period: 3800 },
+      scaleY: { amplitude: 0.014, period: 3800, phase: 0.25 }
+    },
+
     // ビリムシ：小さくて速い。帯電で小刻みに震える
     boltFlit: {
       offsetY: { amplitude: -1.6, period: 300 },
@@ -293,6 +322,23 @@
     frameSlow:   { frames: { interval: 320 } },   // ゆったり
     frameNormal: { frames: { interval: 200 } },
     frameFast:   { frames: { interval: 120 } },   // せわしない
+
+    /**
+     * 地図を歩くプレイヤー。
+     *
+     * 2枚の絵（足の位置が1pxずれているだけ）を交互に出しながら、
+     * 一歩ごとに軽く跳ねる。上半身は同じ絵なので、
+     * 下半身だけが左右に振れて横歩きに見える。
+     *
+     * ★ 跳ねる period は interval と同じにしてある。
+     *   足が入れ替わる瞬間に体がいちばん高くなるので、
+     *   足を踏み出して体が浮く、という形になる。
+     *   speed で書くと丸め誤差でだんだんずれるので、必ず period で書くこと。
+     */
+    playerWalk: {
+      frames:  { interval: 150 },
+      offsetY: { amplitude: -1, period: 150, wave: "bounce" }
+    },
 
     // コマ絵に「ずっと続く動き」を重ねた例。
     // 形が変わりながら、そのあいだも滑らかに浮き沈みする

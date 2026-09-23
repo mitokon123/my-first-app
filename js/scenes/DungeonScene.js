@@ -31,10 +31,12 @@
     this.player = new NS.Player(0, 0);
     this.floor = 1; // 現在の階層
 
+    // 矢印キーは歩く操作なので、カーソル音は鳴らさない（Game._playUiSounds）
+    this.silentCursor = true;
+
     this.encounters = new NS.EncounterSystem(game.data, this.random, this.definition);
     this.features = new NS.FeatureSystem(game.data, this.random, this.definition);
     this.blessings = new NS.BlessingSystem(game.data, this.random);
-    this.saveManager = new NS.SaveManager(game.data);
 
     this.placedFeatures = []; // この階層に置かれた仕掛け（宝箱・泉・罠）
     this.decorations = [];    // この階層の床の飾り（見た目だけ。当たり判定なし）
@@ -42,6 +44,8 @@
     this._moveTimer = 0;  // 次に動けるまでの残り時間（ms）
     // 画面に一時表示する知らせ（セーブ結果・拾ったものなど）
     this.notice = new NS.Notice(((game.data.ui || {}).theme || {}).notice);
+    // 初めての場面で出る説明（出ているあいだは歩けない）
+    this.tutorial = new NS.TutorialBox(this.panel, game);
     // 階を降りるときの暗転（画面は変わらないので自分で行う）
     this.fade = new NS.Fade(((game.data.ui || {}).dungeon || {}).stairFade);
 
@@ -98,6 +102,14 @@
     return result;
   }
 
+  /** テンプレートの {key} を values の値で置き換える（他の画面と同じ書き方） */
+  function fill(template, values) {
+    if (!template) return "";
+    return template.replace(/\{(\w+)\}/g, function (match, key) {
+      return (values[key] !== undefined) ? values[key] : match;
+    });
+  }
+
   /** そのマスが一覧に含まれているか */
   function occupied(list, col, row) {
     for (var i = 0; i < (list || []).length; i++) {
@@ -111,11 +123,11 @@
     return (this.definition && this.definition.floors) || 1;
   };
 
-  /** セーブデータから状態を復元する */
+  /**
+   * 中断データから状態を復元する（Game.resumeSuspended から）。
+   * パーティや持ち物は Game 側で入れ終わっているので、ここは地図と仕掛けだけ。
+   */
   DungeonScene.prototype._restore = function (state) {
-    this.game.party = state.party;
-    if (state.inventory) this.game.inventory = state.inventory;
-    if (state.discovery) this.game.discovery = state.discovery;
     this.game.ensureProgress();   // 足りないものがあれば補う
     this.floor = state.floor || 1;
 
@@ -124,13 +136,30 @@
       this.dungeon = new NS.Dungeon(state.dungeon.rows, def.tiles, this.game.data.config.tileSize);
       this.rooms = [];
       this.player.setPosition(state.dungeon.playerCol, state.dungeon.playerRow);
+      this.placedFeatures = this._restoreFeatures(state.features);
       // 飾りは見た目だけなので保存しない。開いたときに撒き直す
-      this._placeDecorations([{ col: this.player.col, row: this.player.row }]);
+      this._placeDecorations([{ col: this.player.col, row: this.player.row }].concat(this.placedFeatures));
     } else {
       // マップが保存されていない場合は生成し直す
       this._generate();
     }
     this.encounters.setFloor(this.floor);
+  };
+
+  /**
+   * 仕掛けを保存した形（{ col, row, type, used, revealed }）から戻す。
+   * 開けた宝箱が復活しないよう、used もそのまま戻す
+   */
+  DungeonScene.prototype._restoreFeatures = function (saved) {
+    var definitions = this.game.data.features || {};
+    var result = [];
+    for (var i = 0; i < (saved || []).length; i++) {
+      var f = saved[i];
+      if (!definitions[f.type]) continue;
+      result.push({ col: f.col, row: f.row, type: f.type, definition: definitions[f.type],
+                    used: !!f.used, revealed: !!f.revealed });
+    }
+    return result;
   };
 
   /**
@@ -229,29 +258,59 @@
     return (this.game.data.bosses || {})[this.definition.boss] || null;
   };
 
-  DungeonScene.prototype.enter = function () {};
+  /**
+   * 初めてダンジョンに入ったときだけ、歩き方の説明を出す。
+   * 続きから再開した場合も enter は呼ばれるが、
+   * 一度見た説明は TutorialSystem の側で弾かれるので二度は出ない。
+   */
+  DungeonScene.prototype.enter = function () {
+    // ダンジョンごとに曲を変えられる（data/dungeonThemes.js の bgm）。
+    // 書いていない場所は共通の dungeon が流れる
+    this.game.audio.playBgm(this.theme.bgm || "dungeon");
 
-  /** 現在の状態をセーブし、結果を画面に通知する */
-  DungeonScene.prototype._save = function () {
-    var result = this.saveManager.save({
+    if (this.game.tutorial) this.tutorial.show(this.game.tutorial.take("dungeonEnter"));
+  };
+
+  /**
+   * 探索を中断する（問いかけ → 中断データを書いてタイトルへ）。
+   *
+   * ★ 探索中に「セーブ」は無い。
+   *   セーブは拠点でだけ行い、探索の途中は「中断」で置いておく形にした。
+   *   再開すると中断データは消えるので、同じところから何度もやり直せない。
+   */
+  DungeonScene.prototype._beginSuspend = function () {
+    var self = this;
+    var texts = (this.game.data.messages || {}).dungeon || {};
+
+    this._openPrompt(texts.suspendPrompt || "",
+      [
+        { label: texts.suspendNo  || "やめる", value: false },
+        { label: texts.suspendYes || "中断する", value: true }
+      ],
+      function (choice) {
+        if (choice === true) self._suspend();
+      });
+  };
+
+  DungeonScene.prototype._suspend = function () {
+    var result = this.game.suspendRun({
+      dungeonId: this.definition && this.definition.id,
       floor: this.floor,
-      party: this.game.party,
-      storage: this.game.storage,
-      inventory: this.game.inventory,
-      gold: this.game.gold,
-      discovery: this.game.discovery,
-      clearedDungeons: this.game.clearedDungeons,
-      boughtBlessings: this.game.boughtBlessings,
-      offBlessings: this.game.offBlessings,
-      dungeon: {
-        rows: this.dungeon.rows,
-        playerCol: this.player.col,
-        playerRow: this.player.row
-      }
-    });
+      rows: this.dungeon.rows,
+      playerCol: this.player.col,
+      playerRow: this.player.row
+    }, this.placedFeatures);
 
     var texts = (this.game.data.messages || {}).save || {};
-    this._showNotice(texts[result.reason] || result.reason);
+    if (!result.success) {
+      this._showNotice(texts[result.reason] || result.reason);
+      this.game.playError();
+      return;
+    }
+
+    this.game.audio.playSe("save");
+    this.game.run = null;
+    this.game.scenes.change(new NS.TitleScene(this.game));
   };
 
   /** 画面下部に一定時間だけ通知を表示する */
@@ -272,6 +331,12 @@
     this.fade.update(dt);
     if (this.fade.isActive()) return;
 
+    // 説明を出している間は歩けない。読んでいる裏で敵に出会わないように
+    if (this.tutorial.isActive()) {
+      this.tutorial.handleInput(input);
+      return;
+    }
+
     // 問いかけを出している間は、それだけを操作する
     if (this._prompt) {
       this._updatePrompt(input);
@@ -288,9 +353,9 @@
       return;
     }
 
-    // F でセーブ
+    // F で中断（問いかけを出す）
     if (input.isPressed("save")) {
-      this._save();
+      this._beginSuspend();
       return;
     }
 
@@ -355,12 +420,32 @@
         return;
       }
 
+      // 毒などで歩くたびに削れる（1歩進めたときだけ）
+      this._applyWalkDamage();
+
       // 仕掛けマス（宝箱・泉・罠）。踏んだターンは敵と遭遇しない
       if (this._checkFeature()) return;
 
       // 実際に1歩進んだときだけ遭遇判定を行う（壁にぶつかった場合は判定しない）
       var enemies = this.encounters.onStep();
       if (enemies) this._startBattle(enemies);
+    }
+  };
+
+  /**
+   * 歩くたびに削れる状態異常（毒）を、仲間全員に適用する。
+   * 削るのは個体（MonsterInstance.walkStep）。HPは1で止まる。
+   *
+   * ★ 知らせは出さない。
+   *   5歩ごとに画面中央へ知らせが出ると、歩いている最中ずっと視界を遮る。
+   *   左上のパーティ表示に「毒」の印とHPが常に出ているので、
+   *   減っていることはそちらで分かる。
+   */
+  DungeonScene.prototype._applyWalkDamage = function () {
+    var members = this.game.party.getMembers();
+
+    for (var i = 0; i < members.length; i++) {
+      if (members[i].walkStep) members[i].walkStep();
     }
   };
 
@@ -386,6 +471,10 @@
   DungeonScene.prototype._resolveFeature = function (feature) {
     var messages = this.features.resolve(feature, this.game);
     if (messages.length > 0) this._showNotice(messages.join("　"));
+
+    // 仕掛けごとの音（data/features.js の se）。書いていない仕掛けは無音
+    var se = (feature.definition || {}).se;
+    if (se) this.game.audio.playSe(se);
   };
 
   /**
@@ -508,6 +597,7 @@
 
   /** 次の階層へ進む */
   DungeonScene.prototype._descend = function () {
+    this.game.audio.playSe("stairs");
     this.floor++;
     if (this.game.run) this.game.run.recordFloor(this.floor);
     this._generate();
@@ -558,7 +648,19 @@
       // 戻り値をそのまま返すことで、遷移を自前で行ったかどうかを BattleScene へ伝える
       function (result) { return self._onBattleFinished(result); }
     );
-    // 敵と出会う演出をはさむ（data/ui.js の transition.effects.encounter）
+    this._enterBattle(battle);
+  };
+
+  /**
+   * 出会いの演出をはさんで戦闘へ移る。
+   *
+   * ★ 曲は演出が始まるこの瞬間に鳴らし始める。
+   *   戦闘画面が出てからでは、渦を巻いて寄っていく間が無音になり、
+   *   「出会った」感じが弱い。演出の頭で鳴ると、音と絵が同時に切り替わる
+   */
+  DungeonScene.prototype._enterBattle = function (battle) {
+    this.game.audio.playBgm(battle.getBgmId());
+    // 演出の中身は data/ui.js の transition.effects.encounter
     this.game.scenes.change(battle, "encounter");
   };
 
@@ -569,11 +671,14 @@
     if (!enemy) return;
 
     // 主としての補正。仲間にすると外れるので、基礎値を上げずに強くできる
-    if (enemy.setBossMultipliers) enemy.setBossMultipliers(boss.statMultiplier);
+    if (enemy.setEncounterMultipliers) enemy.setEncounterMultipliers(boss.statMultiplier);
     // 決まった順番で動く主は、ここで手順を渡す
     if (enemy.setActionPattern) enemy.setActionPattern(boss.actionPattern);
-    // 主として立ちはだかるあいだだけ効かない状態異常（毒・即死など）
-    if (enemy.setBossStatusImmunity) enemy.setBossStatusImmunity(boss.immuneToStatus);
+    // 主として立ちはだかるあいだだけ効かない状態異常。
+    // 全ボス共通のぶん（data/battle.js の bossImmuneToStatus）に、その主だけのぶんを足す
+    if (enemy.setBossStatusImmunity) {
+      enemy.setBossStatusImmunity(this._bossImmunities(boss));
+    }
 
     var texts = (this.game.data.messages || {}).boss || {};
     var name = boss.title || enemy.getName();
@@ -586,13 +691,37 @@
       function (result) { return self._onBossBattleFinished(result, boss); },
       {
         allowScout: this._canScoutBoss(boss),
-        allowFlee: boss.canFlee === true,
+        // 主からは共通して逃げられない（data/battle.js の bossCanFlee）。
+        // ボスごとの設定にはしていない —— 足すたびの書き忘れを防ぐため
+        allowFlee: (this.game.data.battle || {}).bossCanFlee === true,
         // ボスは高いレベルで戦うので、仲間になるときはレベルを下げる
         scoutLevel: this._bossJoinLevel(boss),
-        introMessage: texts.appear ? texts.appear.replace("{name}", name) : null
+        introMessage: texts.appear ? texts.appear.replace("{name}", name) : null,
+        // 主ごとの曲（data/bosses.js の bgm）。書いていなければ主の共通曲
+        bgm: boss.bgm || null
       }
     );
-    this.game.scenes.change(battle, "encounter");
+    this._enterBattle(battle);
+  };
+
+  /**
+   * 主として立ちはだかるあいだ効かない状態異常。
+   *
+   * 全ボス共通のぶん（data/battle.js の bossImmuneToStatus）と、
+   * その主だけのぶん（data/bosses.js の immuneToStatus）を足したもの。
+   * 共通のほうを1か所に置いてあるのは、逃走（bossCanFlee）と同じで、
+   * ボスを足すときの書き忘れを防ぐため。
+   * @returns {string[]}
+   */
+  DungeonScene.prototype._bossImmunities = function (boss) {
+    var shared = (this.game.data.battle || {}).bossImmuneToStatus || [];
+    var own = (boss && boss.immuneToStatus) || [];
+    var list = shared.slice();
+
+    for (var i = 0; i < own.length; i++) {
+      if (list.indexOf(own[i]) < 0) list.push(own[i]);
+    }
+    return list;
   };
 
   /**
@@ -630,15 +759,17 @@
 
     if (result !== "win") return this._onBattleFinished(result);
 
-    this.game.markDungeonCleared(this.definition && this.definition.id);
+    var newlyCleared = this.game.markDungeonCleared(this.definition && this.definition.id);
 
     // 最後のボスならエンディングへ、そうでなければ結果を見せてから拠点へ
     if (boss.isFinal) {
       this.game.endRun(true);
       this.game.scenes.change(new NS.EndingScene(this.game));
-    } else {
-      this._returnToHome(true, "cleared");
+      return true;
     }
+
+    // はじめてのクリアなら、その場でセーブする（第3引数）
+    this._returnToHome(true, "cleared", newlyCleared);
     return true;
   };
 
@@ -664,12 +795,21 @@
    *
    * @param {boolean} survived 無事に帰れたか（false なら拾ったものを失う）
    * @param {string} [outcome] "escaped" / "cleared" / "defeated"。省略時は生死から決める
+   * @param {boolean} [autoSave] 帰り着いた時点でセーブするか（はじめてのクリアのとき）
    */
-  DungeonScene.prototype._returnToHome = function (survived, outcome) {
+  DungeonScene.prototype._returnToHome = function (survived, outcome, autoSave) {
     if (this.game.run) this.game.run.recordFloor(this.floor);
 
     var summary = this.game.run ? this.game.run.getSummary() : null;
     var lost = this.game.endRun(survived);
+
+    // ★ クリア記録だけは、この場で書き出す。
+    //   このゲームは手動セーブだが、クリアは「1回の挑戦の成果」ではなく
+    //   次のダンジョン・店・工房が開くという恒久的な変化なので、
+    //   セーブし忘れて消えると、もう一度主を倒しに行くことになる。
+    //   endRun のあとなので、保存されるのは拠点に着いた状態（全快後）。
+    var saved = autoSave ? this.game.saveProgress().success : false;
+    if (saved) this.game.audio.playSe("save");
 
     this.game.scenes.change(new NS.ResultScene(this.game, {
       outcome: outcome || (survived ? "escaped" : "defeated"),
@@ -677,7 +817,8 @@
       floor: (summary && summary.floor) || this.floor,
       gold: (summary && summary.gold) || 0,
       items: (summary && summary.items) || [],
-      lostItems: (lost && lost.items) || []
+      lostItems: (lost && lost.items) || [],
+      saved: saved
     }));
   };
 
@@ -703,34 +844,73 @@
 
         this.renderer.rect(c * ts, r * ts, ts, ts, tileColors[tile.name] || tile.color);
 
-        // 階段はひと目で分かるように記号を重ねる
-        if (tile.stairs) {
-          this.renderer.text(mark.text || "▼", c * ts + ts / 2, r * ts + ts / 2 + 7,
-            { color: mark.color || "#ffd75e", font: mark.font || "20px monospace", align: "center" });
-        }
+        // 階段はひと目で分かるように重ねて描く。
+        // 絵が用意されていれば絵、無ければ今までどおり記号
+        if (tile.stairs) this._drawStairs(c, r, ts, mark);
       }
     }
 
     this._renderDecorations(ts);
     this._renderFeatures(ts, L.featureMark || {});
 
-    // プレイヤー描画（グリッド座標→ピクセル座標への変換はここでのみ行う）
-    //   描くのは「見た目の位置」。判定に使う col/row を少し遅れて追いかける
-    var px = this.player.viewCol * ts;
-    var py = this.player.viewRow * ts;
-    this.sprites.drawMotion(this.player.spriteId, px, py, ts, ts,
-      NS.Motion.forSprite(this.game.data, this.player.spriteId, L.playerMotion,
-        this.game.clock, 0));
+    this._renderPlayer(ts);
 
     this._renderInfoBar(w, h, L.infoBar || {});
-    this._renderPartyStatus(w, L.statusBar || {});
+    this._renderPartyStatus(L.partyStatus || {});
     // マウス用のボタンは地図の上に重ねる
     this.partyButton.render();
     this.itemsButton.render();
 
     this._renderNotice(w, h, L.notice || {});
     this._renderPrompt();
-    this.fade.render(ctx);   // 階の切り替えの暗幕は、すべての上に重ねる
+    this.tutorial.render();   // 説明は地図の上に重ねる
+    this.fade.render(ctx);    // 階の切り替えの暗幕は、すべての上に重ねる
+  };
+
+  /**
+   * 階段を1マス分描く。
+   *
+   * ★ 絵（sprite）と記号（text）の両方に対応させてある。
+   *   ダンジョンのテーマ（data/dungeonThemes.js）が stairsMark を
+   *   上書きできる作りなので、場所によって別の絵にすることもできる。
+   */
+  DungeonScene.prototype._drawStairs = function (col, row, ts, mark) {
+    if (mark.sprite && this.game.assets.get(mark.sprite)) {
+      this.sprites.draw(mark.sprite, col * ts, row * ts, ts, ts);
+      return;
+    }
+
+    this.renderer.text(mark.text || "▼", col * ts + ts / 2, row * ts + ts / 2 + 7,
+      { color: mark.color || "#ffd75e", font: mark.font || "20px monospace", align: "center" });
+  };
+
+  /**
+   * プレイヤーを描く。
+   * グリッド座標からピクセル座標への変換は、ここでのみ行う。
+   *
+   * ★ 描くのは「見た目の位置」（viewCol / viewRow）。
+   *   判定に使う col/row を少し遅れて追いかけるので、マス間を滑って見える。
+   *
+   * ★ 歩いているあいだだけコマ絵の動きに切り替える。
+   *   「見た目の位置が本当の位置に追いついていない＝まだ歩いている」で判定する。
+   *   歩数を数えたりタイマーを持ったりしなくてよい。
+   */
+  DungeonScene.prototype._renderPlayer = function (ts) {
+    var look = (this.game.data.player || {}).appearance || {};
+    // 選んだ服の色の絵を使う（決めていなければ既定の色になる）
+    var sprite = NS.PlayerLook
+      ? NS.PlayerLook.spritesFor(this.game.data, this.game.getPlayerColor())
+      : (look.sprite || "playerWalk1");
+
+    var motionId = this.player.isSettled()
+      ? (look.idleMotion || "breathe")
+      : (look.walkMotion || "playerWalk");
+
+    var px = this.player.viewCol * ts;
+    var py = this.player.viewRow * ts;
+
+    this.sprites.drawMotion(sprite, px, py, ts, ts,
+      NS.Motion.forSprite(this.game.data, sprite, motionId, this.game.clock, 0));
   };
 
   /**
@@ -818,22 +998,92 @@
       { color: style.color || "#c8d0e8", font: style.font || "13px monospace" });
   };
 
-  /** 画面上部に先頭モンスターの状態を表示 */
-  DungeonScene.prototype._renderPartyStatus = function (w, style) {
+  /**
+   * 画面左上のパーティ表示。仲間全員の「名前とHP」を並べる。
+   *
+   * ▼ なぜ全員ぶんを出すのか
+   * 以前は先頭の1体だけを横帯で出していたが、それだと
+   * 控えのHPを見るのに、そのつど仲間画面を開かなければならなかった。
+   *
+   * ▼ 状態異常の印
+   * 名前のうしろに出す。文字と色は data/statuses.js の short / color で、
+   * 戦闘中の印（BattleScene._renderModifierMarks）とまったく同じものが並ぶ。
+   * ダンジョンでは毒が歩くたびに削ってくるので、
+   * 「いま誰が毒か」がここで分からないと、解毒草を使う判断ができない。
+   *
+   * 枠の高さは人数から決める（data/ui.js に高さは書かない）。
+   */
+  DungeonScene.prototype._renderPartyStatus = function (style) {
     var party = this.game.party;
     if (!party || party.isEmpty()) return;
 
-    var barHeight = style.height || 22;
-    var lead = party.getLead() || party.get(0);
-    this.renderer.rect(0, 0, w, barHeight, style.bg || "rgba(0,0,0,0.6)");
-    this.renderer.text(
-      lead.getName() + "  Lv" + lead.level +
-      "  HP " + lead.currentHp + "/" + lead.getMaxHp() +
-      "   仲間 " + party.size() + "/" + party.maxSize,
-      10, barHeight - 6,
-      { color: style.color || "#c8d0e8", font: style.font || "13px monospace" }
-    );
+    var members = party.getMembers();
+    var t = this.panel.theme;
+    var ctx = this.game.ctx;
+
+    var x0 = style.x || 0;
+    var y0 = style.y || 0;
+    var pad = style.padding || 8;
+    var rowHeight = style.rowHeight || 16;
+    var boxW = style.width || 190;
+    var font = style.font || t.smallFont || "12px monospace";
+
+    this.renderer.rect(x0, y0, boxW, pad * 2 + rowHeight * members.length,
+      style.bg || "rgba(0,0,0,0.6)");
+
+    // HPの数値を右端に置くので、名前と印はその手前までしか使えない
+    ctx.font = font;
+    var hpRight = x0 + boxW - pad;
+    var nameLimit = hpRight - ctx.measureText("000/000").width - 8;
+
+    for (var i = 0; i < members.length; i++) {
+      var m = members[i];
+      var y = y0 + pad + rowHeight * (i + 1) - 4;
+      var fainted = m.isFainted();
+
+      ctx.font = font;
+      var name = clipText(ctx, m.getName(), nameLimit - (x0 + pad));
+      this.renderer.text(name, x0 + pad, y, {
+        font: font,
+        color: fainted ? (style.faintColor || t.hpBarLow) : (style.color || t.textColor)
+      });
+
+      ctx.font = font;
+      NS.StatusMarks.draw(this.panel, NS.StatusMarks.defsOf(m),
+        x0 + pad + ctx.measureText(name).width + 6, y,
+        { font: font, gap: 2, maxX: nameLimit, sprites: this.sprites, data: this.game.data, size: 12 });
+
+      // HPは右寄せ。残りが少ないほど色が変わる（戦闘のHPバーと同じしきい値）
+      this.renderer.text(m.currentHp + "/" + m.getMaxHp(), hpRight, y,
+        { font: font, color: this._hpColor(m), align: "right" });
+    }
   };
+
+  /** 残りHPの割合で決まる文字色。しきい値も色も data/ui.js の theme から取る */
+  DungeonScene.prototype._hpColor = function (monster) {
+    var t = this.panel.theme;
+    var max = monster.getMaxHp();
+    var ratio = (max > 0) ? (monster.currentHp / max) : 0;
+
+    if (ratio <= (t.hpLowThreshold || 0.25)) return t.hpBarLow;
+    if (ratio <= (t.hpMidThreshold || 0.5)) return t.hpBarMid;
+    return t.hpBarHigh;
+  };
+
+  /**
+   * 幅に収まらない文字列を切り詰めて「…」を付ける。
+   * 名前は自分で付けられるので、長い名前で枠からはみ出さないようにする。
+   * ※ 呼ぶ前に ctx.font を設定しておくこと
+   */
+  function clipText(ctx, text, maxWidth) {
+    if (maxWidth <= 0 || ctx.measureText(text).width <= maxWidth) return text;
+
+    for (var len = text.length - 1; len > 0; len--) {
+      var cut = text.slice(0, len) + "…";
+      if (ctx.measureText(cut).width <= maxWidth) return cut;
+    }
+    return "…";
+  }
 
   /** セーブ結果などの通知（画面中央） */
   DungeonScene.prototype._renderNotice = function (w, h, style) {

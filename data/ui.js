@@ -26,16 +26,40 @@
      *   veilPower… 暗くなり始めを遅らせる度合い（1でまっすぐ暗くなる）
      *              歪みを見せたい演出では上げる。上げないと歪む前に真っ暗になる
      */
+    /**
+     * 画面の切り替え（js/core/SceneManager.js）。
+     *   duration … 演出全体の長さ（ms）。暗くする＋明るく戻す
+     *   outRatio … そのうち「暗くする」に使う割合。省略で 0.5（行き帰り同じ）
+     */
     transition: {
-      duration: 65,
+      duration: 130,
       color: "#04060c",
       effects: {
-        // 敵と出会ったとき。粗くなりながら渦を巻いて寄っていく
+        // 敵と出会ったとき。粗くなりながら渦を巻いて寄っていく。
+        // 行き（渦）に 3/4 を使い、戦闘画面は 1/4 でさっと現れる。
+        // 戦闘曲は演出の頭から鳴る
         encounter: {
-          duration: 380, color: "#0b0f1a",
+          duration: 1750, outRatio: 0.75, color: "#0b0f1a",
           blockMax: 28, turns: 0.4, zoom: 1.6, veilPower: 3.2
         }
       }
+    },
+
+    /**
+     * 文字の隣に出す小さな絵（data/sprites_icons.js）。
+     *   size      … 描く大きさ（px）。文字の高さに合わせてある
+     *   stats     … バフ／デバフの印に使うステータスの絵。other は与・被ダメージが変わるもの
+     *   arrowUp / arrowDown … ステータスの絵に重ねる矢印
+     * 属性・状態異常の絵は、それぞれ data/elements.js / data/statuses.js の icon。
+     */
+    icons: {
+      size: 14,
+      stats: {
+        hp: "iconStatHp", attack: "iconStatAttack", defense: "iconStatDefense",
+        speed: "iconStatSpeed", pp: "iconStatPp", other: "iconStatOther"
+      },
+      arrowUp: "iconArrowUp",
+      arrowDown: "iconArrowDown"
     },
 
     theme: {
@@ -72,7 +96,23 @@
 
       // マウス用の「戻る」ボタン。全画面で同じ位置に出す
       backButton: { x: 688, y: 552, w: 84, h: 30 },
-      buttonHoverBg: "rgba(74,107,168,0.45)"
+      buttonHoverBg: "rgba(74,107,168,0.45)",
+
+      /**
+       * 一覧（js/ui/ScrollList.js）のスクロールバー。枠の右端に細く出す。
+       *   width / margin … 太さと、枠の右端からの余白
+       *   minHandle      … つまみの最小の長さ（行が多くても掴めるように）
+       *   smoothing      … 1フレームで目標へ近づく割合（0〜1。1 で即座、小さいほどぬるっと動く）
+       *   track / handle / handleActive … 溝・つまみ・掴んでいるときの色
+       *   wheelRows      … ホイール1段で何行ぶん動くか（設定の「スクロール速度」が掛かる）
+       */
+      scrollbar: {
+        width: 6, margin: 4, minHandle: 24, smoothing: 0.35,
+        track: "rgba(255,255,255,0.06)",
+        handle: "rgba(154,164,192,0.55)",
+        handleActive: "rgba(255,215,94,0.85)",
+        wheelRows: 1
+      }
     },
 
     /**
@@ -135,20 +175,40 @@
       // 副題
       subtitle: { x: 400, y: 258, font: "13px monospace", color: "#55638c" },
 
-      menu: { x: 310, y: 346, w: 180, h: 78 },
+      // 「新しく始める」「続きから」の2つ。
+      // 項目の左に絵が付くので、以前より横幅を広げてある
+      menu: { x: 288, y: 340, w: 224, h: 74, lineHeight: 32, iconSize: 20 },
 
-      // 「新しく始める」の確認。メニューの位置に重ねて表示する
-      confirm: {
-        box:  { x: 250, y: 320, w: 300, h: 132 },
-        title:{ x: 400, y: 348 },
-        body: { x: 400, y: 372 },
-        note: { x: 400, y: 394 },
-        menu: { x: 340, y: 402, w: 120, h: 44 }
+      /**
+       * バージョン表記の隣に置く、パッチノートを開くボタン。
+       *
+       *   idleAlpha   … ふだんの濃さ。薄くしておき、隅の飾りとして邪魔しない
+       *   activeAlpha … カーソルを乗せたときの濃さ
+       *   label       … 乗せたときだけ出す文字の位置
+       *
+       * ★ x/y はアイコンの左上。当たり判定も同じ四角なので、
+       *   位置を変えれば押せる場所も一緒に動く
+       */
+      patchButton: {
+        icon: "iconPatchNote",
+        x: 744, y: 566, size: 22,
+        idleAlpha: 0.5, activeAlpha: 1,
+        // ★ 文字はアイコンの**上**に出す。
+        //   バージョン表記と同じ行に置くと重なって読めなくなる
+        label: { x: 766, y: 558 }
       },
 
       notice: { x: 400, y: 464 },
-      hint: { x: 400, y: 566 },
-      version: { x: 792, y: 590 }
+      // 操作案内。左下のクレジット（4行）と行がぶつからないよう、その上に置く
+      hint: { x: 400, y: 522 },
+      version: { x: 736, y: 590 },
+
+      /**
+       * 素材のクレジット（data/audio.js の credits）。左下に置く。
+       * 2件以上あるときは、下から上へ lineHeight ずつ積み上げる
+       * （1件目がいちばん下＝バージョン表記と同じ行）。
+       */
+      credit: { x: 16, y: 590, lineHeight: 16 }
     },
 
     /**
@@ -174,6 +234,15 @@
       subMenu: { x: 280, y: 428, w: 250, h: 152, visibleRows: 5, rowHeight: 26 },
       // 選んでいる技・道具の内容（メッセージ欄の左側に出す）
       skillInfo: { charsPerLine: 16, elementOffsetX: 110 },
+
+      /**
+       * 「状態を見る」の欄（メッセージ欄に重ねて出す）。
+       * 左に見ている相手の名前とHP・PP、右に状態異常とバフ／デバフを残りターンつきで並べる。
+       *   columnX … 右側（状態の一覧）の左端
+       *   lineHeight … 1行の高さ
+       *   iconSize … 印の絵の大きさ
+       */
+      inspect: { columnX: 300, lineHeight: 20, iconSize: 16 },
 
       /**
        * 行動の再生（アニメーション）に関する設定。
@@ -239,6 +308,8 @@
                        flash: "#5fd18c", flashAlpha: 0.12 },
           miss:      { color: "#9aa4c0", font: "18px monospace", shake: 0 },
           immune:    { color: "#8b6fd6", font: "18px monospace", shake: 0 },
+          // ターン終了時の毒ダメージ。殴られたわけではないので揺らさない
+          statusDamage: { color: "#7fd06a", font: "18px monospace", shake: 0 },
           faint:     { shake: 6 }
         },
 
@@ -319,6 +390,131 @@
     },
 
     /**
+     * 主人公の名前と服の色を決める画面（js/scenes/PlayerSetupScene.js）。
+     *
+     * 左に「選んでいる色で歩いている姿」、右に決める項目を縦に並べる。
+     *   preview.x/y  … 絵の**中心**の座標
+     *   rows         … 名前・色の欄。h+gap ずつ下にずれる
+     *   swatch       … 色見本1つぶんの大きさと間隔（6色ぶん横に並ぶ）
+     */
+    playerSetup: {
+      background: "#0a0f1c",
+      title:    { x: 48, y: 62, font: "26px monospace", color: "#e6ecff" },
+      subtitle: { x: 48, y: 88, font: "13px monospace", color: "#7f8db8" },
+
+      preview: { boxX: 48, boxY: 122, boxW: 240, boxH: 300,
+                 x: 168, y: 250, size: 176, labelY: 392 },
+
+      rows:   { x: 310, y: 130, w: 442, h: 66, gap: 14 },
+      // 色見本は「色」の欄（rows の2つ目）の中に置く
+      swatch: { x: 420, y: 226, size: 34, gap: 12 },
+      done:   { x: 310, y: 296, w: 442, h: 52 },
+
+      hint:   { x: 48, y: 570 }
+    },
+
+    /**
+     * セーブファイルを選ぶ画面（js/scenes/SaveSlotScene.js）。
+     *
+     * スロットは縦に3つ。1つぶんの高さは row.h、間隔は row.gap。
+     * ★ スロットを4つ以上にするときは、row.h を詰めるか row.y を上げること
+     *   （3つ × (96+14) で 470px 使う。上の見出しと下の案内で残りが埋まる）
+     */
+    saveSlot: {
+      background: "#0a0f1c",
+      title:    { x: 48, y: 62, font: "26px monospace", color: "#e6ecff" },
+      subtitle: { x: 48, y: 88, font: "13px monospace", color: "#7f8db8" },
+
+      row:  { x: 60, y: 118, w: 680, h: 96, gap: 14 },
+      // スロットの絵。1つの枠の中での位置
+      icon: { size: 28, offsetY: 20 },
+      iconName: "iconSlot",
+      textPadding: 10,
+      lineHeight: 22,
+
+      // 確認の窓。後ろを暗く落としてから出す。
+      // ★ menu が box の下端に触れないよう、box は menu より 28px ぶん長くしてある
+      confirm: {
+        veil:       "rgba(4,6,12,0.72)",
+        background: "#0d1220",
+        box:   { x: 220, y: 200, w: 360, h: 210 },
+        title: { x: 400, y: 244 },
+        body:  { x: 400, y: 276 },
+        note:  { x: 400, y: 300 },
+        menu:  { x: 336, y: 314, w: 128, h: 68, lineHeight: 28 }
+      },
+
+      /**
+       * 整理モードで出す「コピー／移動／削除／やめる」。
+       * 確認の窓より小さく、後ろは暗く落とさない
+       * （どのファイルを選んでいるかが見えていたほうがよい）。
+       */
+      action: {
+        background: "#0d1220",
+        box:   { x: 268, y: 214, w: 264, h: 186 },
+        title: { x: 400, y: 244 },
+        menu:  { x: 310, y: 258, w: 180, h: 128, lineHeight: 28 }
+      },
+
+      // 整理モードへの出入り口。「戻る」の左に置く
+      manageButton: { x: 566, y: 552, w: 112, h: 30 },
+
+      notice: { x: 400, y: 528 },
+      hint:   { x: 48, y: 570 }
+    },
+
+    /**
+     * チュートリアルのふきだし（js/ui/TutorialBox.js）。
+     *
+     * 高さは書かない。**説明の行数から計算する**ので、
+     * 3行の説明でも5行の説明でも、余白が空いたりはみ出したりしない。
+     *   titleHeight … 枠の上端から見出しまで
+     *   lineHeight  … 本文の行間
+     *   hintHeight  … 本文の下から操作案内まで
+     *
+     * 戦闘中でも盤面の上半分が見えるよう、少し下に置いてある。
+     */
+    tutorial: {
+      box:        { x: 176, y: 168, w: 448 },
+      // 後ろを完全に隠す色。共通の枠は半透明なので、ここだけ不透明にしている
+      background: "#0d1220",
+      padding:    20,
+      titleHeight: 30,
+      titleFont:  "17px monospace",
+      lineHeight: 22,
+      hintHeight: 30,
+
+      /**
+       * 「この項目です」と指すときの見た目（data/tutorial.js の pointAt）。
+       *   padding  … 囲みを指し先より何px外側に広げるか
+       *   headSize … 矢じりの大きさ
+       */
+      pointer: { color: "#ffd75e", lineWidth: 2, padding: 3, headSize: 9 }
+    },
+
+    /**
+     * 遊び方（よくある質問）。左に質問の一覧、右に答え。
+     *
+     * 持ち物の画面より一覧を細く・答えを広くしてある。
+     * 質問は短く、答えは長いため。
+     *
+     *   answer.charsPerLine … 何文字で折り返すか（smallFont が 12px なので
+     *     枠の幅 362 − 余白20 ≒ 342px。全角24文字ぶんに収まる）
+     *   answer.visibleLines … 一度に出す行数。これを超えると▲▼が出て Q/E で送れる
+     */
+    help: {
+      background: "#0a0f1c",
+      title:    { x: 48, y: 62, font: "26px monospace", color: "#e6ecff" },
+      subtitle: { x: 48, y: 88, font: "13px monospace", color: "#7f8db8" },
+
+      list:   { x: 48, y: 122, w: 330, h: 372, rowHeight: 26, visibleRows: 13 },
+      detail: { x: 398, y: 122, w: 362, h: 372 },
+      answer: { charsPerLine: 24, lineHeight: 20, visibleLines: 14 },
+
+      hint:   { x: 48, y: 570 }
+    },
+
+    /**
      * 図鑑画面。上でタブ（モンスター／アイテム）を切り替え、
      * 左に一覧、右に詳細を出す。
      */
@@ -371,7 +567,10 @@
       tag: { w: 34, h: 16 },
       tagTextColor: "#0a0f1c",
 
-      list:  { x: 48, y: 122, w: 250, h: 372, rowHeight: 56 },
+      // visibleRows … 一度に出すバージョンの数。
+      //   ★ バージョンは増え続けるので、入りきらない前提で送れるようにしてある。
+      //     これが無かったころは8個目から枠の外へはみ出していた
+      list:  { x: 48, y: 122, w: 250, h: 372, rowHeight: 56, visibleRows: 6 },
       selectedBg: "rgba(74,107,168,0.3)",
       notes: { x: 316, y: 112, w: 444, h: 382, charsPerLine: 30 },
 
@@ -450,6 +649,10 @@
       list:   { x: 48, y: 122, w: 400, h: 372, rowHeight: 26, visibleRows: 12 },
       detail: { x: 470, y: 122, w: 290, h: 372, charsPerLine: 18 },
 
+      // 等級ごとの編成数。詳細欄の下半分に、いつも同じ場所で出す。
+      //   0個の等級があると選択肢の枠が1つ空くので、ここが実質の要
+      tierSummary: { x: 482, y: 330, lineHeight: 18 },
+
       notice: { x: 400, y: 526 },
       hint:   { x: 48, y: 570 }
     },
@@ -490,6 +693,9 @@
       background: "#0a0f1c",
       title:    { x: 400, y: 96, font: "28px monospace", color: "#e6ecff", align: "center" },
       subtitle: { x: 400, y: 128, font: "14px monospace", color: "#7f8db8", align: "center" },
+      // はじめてクリアしたときだけ出る「自動でセーブした」の一行。
+      // 副題と所持金のあいだに置く（出ない挑戦のほうが多いので、間が空くだけ）
+      savedNote:{ x: 400, y: 148, font: "12px monospace", color: "#5fd18c", align: "center" },
       gold:     { x: 400, y: 168, font: "18px monospace", color: "#ffd75e", align: "center" },
       list:     { x: 230, y: 196, w: 340, h: 300, rowHeight: 26, visibleRows: 10 },
       // マウスだけでも先へ進めるようにするボタン
@@ -534,12 +740,18 @@
      */
     dungeon: {
       background: "#05070d",
-      statusBar: { height: 22, bg: "rgba(0,0,0,0.6)", color: "#c8d0e8", font: "13px monospace" },
+      // 左上のパーティ表示（名前・状態異常の印・HP）。
+      //   高さは書かない。仲間の人数から決まる（DungeonScene._renderPartyStatus）
+      //   width … 枠の横幅。名前が長いときは「…」で切り詰める
+      partyStatus: { x: 0, y: 0, width: 196, padding: 8, rowHeight: 16,
+                     bg: "rgba(0,0,0,0.6)", color: "#c8d0e8", font: "12px monospace" },
       infoBar:   { height: 24, bg: "rgba(0,0,0,0.7)", color: "#c8d0e8", font: "13px monospace" },
       notice:    { height: 40, bg: "rgba(8,10,20,0.92)", color: "#ffd75e", font: "15px monospace" },
-      stairsMark: { text: "▼", color: "#ffd75e", font: "20px monospace" },
-      // 立ち止まっているときも生きて見えるように（data/motions.js のid）
-      playerMotion: "breathe",
+      // 階段の見た目。sprite があればそれを描き、無ければ text の記号を描く。
+      // ダンジョンのテーマ側で上書きすれば、場所ごとに別の絵にもできる
+      stairsMark: { sprite: "stairsDown", text: "▼", color: "#ffd75e", font: "20px monospace" },
+      // ※ プレイヤーの絵と動きは data/player.js の appearance に移した
+      //   （見た目はUIの配置ではなく、そのキャラクターの持ち物なので）
       // 1マス進むのにかける時間（ms）。マスからマスへ滑って移動する。
       //   歩く間隔（130ms）より短くしておくと、一歩ごとに落ち着いて見える。
       //   0 にすると今までどおり瞬間移動になる
@@ -578,13 +790,37 @@
       // 先頭から何体が戦闘に出るかを示す線
       fieldDivider: { color: "#ffd75e", label: "出撃" },
       // 選択中の個体の詳細
-      detail: { x: 540, y: 58, w: 228, h: 424 },
+      // 下端は「戻る」ボタン（theme.backButton の y 552）の少し上まで。
+      // 中身が多い仲間は行間を詰めて収める（PartyScene._detailLineHeight）
+      detail: { x: 540, y: 58, w: 228, h: 484 },
       // 装備を選ぶときの一覧（詳細欄の位置に重ねて出す）
       //   下の余白にステータスの変化（着ける前 → 着けたあと）を出す
       equipList: { x: 540, y: 58, w: 228, h: 230, rowHeight: 26, visibleRows: 7 },
       // 「この仲間をどうするか」の項目。
       // h は最低の高さで、項目が増えたぶんは CommandMenu が自動で伸ばす
       actionMenu: { x: 300, y: 180, w: 220, h: 140, lineHeight: 28 },
+
+      /**
+       * 「様子を見る」の画面。画面ぜんぶを1枚の枠にして、3列に分ける。
+       *   左   … 絵（sprite.x/y は**中心**の座標）と名前、その下に技と特性
+       *   中央 … ステータス（装備で上がったぶんは「(+8)」）と装備、装備の効果
+       *   右   … 属性耐性と状態異常耐性（2列の表。装備で上がったぶんは「(+3)」）
+       * 文字は一覧の詳細欄より一段大きい（font）。ゆっくり眺める画面なので読みやすさを優先
+       */
+      inspect: {
+        box:    { x: 32, y: 48, w: 736, h: 470 },
+        sprite: { x: 150, y: 160, size: 128 },
+        name:   { y: 246 },
+        left:   { x: 64, y: 316, lineHeight: 20 },
+        stats:  { x: 268, y: 96, lineHeight: 22, font: "14px monospace" },
+        resist: { x: 502, y: 96, lineHeight: 22, colWidth: 126, font: "14px monospace", iconSize: 16 },
+        // 特性と装備でいま効いている効果。耐性の表の下に続けて出す。
+        //   gap      … 状態異常の表との間隔
+        //   font     … 効果の文（「素早さ ×1.1」）
+        //   fromFont … どこから来ているか（「（深淵の牙）」）。小さくして主張させない
+        effects: { gap: 12, lineHeight: 18, font: "13px monospace", fromFont: "11px monospace" }
+      },
+
       hint: { x: 32, y: 576 }
     }
   };

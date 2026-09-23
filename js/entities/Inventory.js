@@ -3,7 +3,12 @@
  * 持ち物（アイテムの所持数）を管理する。
  *
  * アイテムの定義そのものは data/items.js が持ち、ここは「何を何個持っているか」だけを扱う。
- * 1種類あたりの上限は items.js の maxStack、種類数の上限は data/player.js の inventoryMax。
+ * 上限は items.js の maxStack（1種類あたり何個まで）だけ。
+ *
+ * ★ 種類数の上限は持たない。
+ *   以前は data/player.js の inventoryMax（20種類）で枠を区切っていたが、
+ *   素材が増えるほど「店で買えない」「拾えない」が起きるだけだったので外した。
+ *   「持ち物がいっぱい」という状態はもう作らない。
  *
  * 並び順は「手に入れた順」を保つ（分類ごとの並べ替えは表示側で行う）。
  */
@@ -12,14 +17,9 @@
 
   /**
    * @param {MyGame.GameData} gameData
-   * @param {number} [maxSlots] 種類数の上限（省略時は data/player.js の inventoryMax）
    */
-  function Inventory(gameData, maxSlots) {
+  function Inventory(gameData) {
     this.data = gameData;
-    this.maxSlots = (maxSlots === undefined)
-      ? (gameData.player || {}).inventoryMax
-      : maxSlots;
-
     this.slots = [];  // [{ itemId, count }] 手に入れた順
   }
 
@@ -28,11 +28,6 @@
   Inventory.prototype.getSlots = function () { return this.slots; };
   Inventory.prototype.slotCount = function () { return this.slots.length; };
   Inventory.prototype.isEmpty = function () { return this.slots.length === 0; };
-
-  Inventory.prototype.isFull = function () {
-    if (this.maxSlots === undefined || this.maxSlots === null) return false;
-    return this.slots.length >= this.maxSlots;
-  };
 
   /** 指定アイテムの所持数（持っていなければ 0） */
   Inventory.prototype.getCount = function (itemId) {
@@ -77,7 +72,8 @@
 
   /**
    * アイテムを加える。
-   * 既に持っていればその数を増やし、無ければ新しい枠を使う。
+   * 既に持っていればその数を増やし、無ければ新しい行を作る。
+   * 行はいくつでも増やせるので、入らないのは maxStack に達したときだけ。
    * @returns {number} 実際に加えられた個数（上限で入りきらない分は加えない）
    */
   Inventory.prototype.add = function (itemId, count) {
@@ -91,7 +87,6 @@
     var slot = this._findSlot(itemId);
 
     if (!slot) {
-      if (this.isFull()) return 0;
       slot = { itemId: itemId, count: 0 };
       this.slots.push(slot);
     }

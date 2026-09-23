@@ -12,6 +12,8 @@
  * 止まっている時間はごく短いので、動きが固まったようには見えない。
  *
  * 設定（長さと色）は data/ui.js の transition。長さを0にすると今までどおり即座に切り替わる。
+ *   duration … 演出全体の長さ（暗くする＋明るく戻す）
+ *   outRatio … そのうち「暗くする」に使う割合（省略で 0.5 ＝ 行き帰り同じ）
  */
 (function (NS) {
   "use strict";
@@ -49,7 +51,7 @@
     this._effectParams = effect;
     this._next = scene;
     this._phase = "out";
-    this._timer = effect.duration;
+    this._timer = this._phaseLength("out");
   };
 
   /**
@@ -61,8 +63,13 @@
     var chosen = (effectId && effects[effectId]) || {};
 
     return {
+      // 演出全体の長さ（暗くする＋明るく戻す）
       duration: (chosen.duration === undefined)
         ? (this.params.duration || 0) : chosen.duration,
+      // そのうち「暗くする」に使う割合。残りが「明るく戻す」
+      outRatio: (chosen.outRatio === undefined)
+        ? (this.params.outRatio === undefined ? 0.5 : this.params.outRatio)
+        : chosen.outRatio,
       color: chosen.color || this.params.color || "#000000",
       blockMax: chosen.blockMax || 0,   // 何倍まで粗くするか（1以下で無効）
       turns: chosen.turns || 0,         // 何回まわすか
@@ -73,7 +80,7 @@
     };
   };
 
-  /** 切り替えの最中か（暗転・明転を含む） */
+  /** 切り替えの最中か（暗くしている・明るく戻している間） */
   SceneManager.prototype.isChanging = function () {
     return this._phase !== "idle";
   };
@@ -102,12 +109,24 @@
       this._swap(this._next);
       this._next = null;
       this._phase = "in";
-      this._timer = this._current().duration;
+      this._timer = this._phaseLength("in");
       return;
     }
     this._phase = "idle";
     this._timer = 0;
     this._effectParams = null;
+  };
+
+  /**
+   * 「暗くする」「明るく戻す」それぞれの長さ（ms）。
+   * 全体の duration を outRatio で分ける。
+   *   outRatio 0.5  … 行きと帰りが同じ長さ
+   *   outRatio 0.75 … 行きにたっぷり使い、帰りは短く
+   */
+  SceneManager.prototype._phaseLength = function (phase) {
+    var effect = this._current();
+    var ratio = Math.max(0, Math.min(1, effect.outRatio));
+    return effect.duration * (phase === "out" ? ratio : 1 - ratio);
   };
 
   SceneManager.prototype.render = function (ctx) {
@@ -212,10 +231,13 @@
    * out では0から1へ、in では1から0へ戻る。歪みの強さもこれを使う。
    */
   SceneManager.prototype._progress = function () {
-    var duration = this._current().duration;
-    if (this._phase === "idle" || duration <= 0) return 0;
+    if (this._phase === "idle") return 0;
 
-    var remain = Math.max(0, this._timer) / duration;
+    var length = this._phaseLength(this._phase);
+    // 長さ0の側は、その瞬間だけいちばん暗い状態として扱う
+    if (length <= 0) return (this._phase === "out") ? 1 : 0;
+
+    var remain = Math.max(0, this._timer) / length;
     return (this._phase === "out") ? (1 - remain) : remain;
   };
 

@@ -20,12 +20,17 @@
    * @param {number} col 列（グリッドX）
    * @param {number} row 行（グリッドY）
    */
+  /**
+   * ★ 見た目（絵と動き）はここには持たない。
+   *   data/player.js の appearance にあり、描く側（DungeonScene）が読む。
+   *   位置を預かるだけの入れ物にしておくと、
+   *   絵を差し替えるのにこのファイルを触らなくて済む。
+   */
   function Player(col, row) {
     this.col = col;
     this.row = row;
     this.viewCol = col;
     this.viewRow = row;
-    this.spriteId = "player";
   }
 
   /**

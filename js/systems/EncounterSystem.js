@@ -10,6 +10,14 @@
  *   出現レベル … 種族ごとの指定 → その階の指定 → その場所の指定 → 全体の既定
  *   敵の数     … その階の指定 → その場所の指定 → 全体の既定
  *   出現表     … その階の指定 → その場所の指定
+ *
+ * ▼ 出現表の1件に書けるもの（data/dungeons.js）
+ *   species        : 種族id
+ *   weight         : 出やすさ
+ *   minFloor / maxFloor : その階にだけ出す
+ *   minLevel / maxLevel : その種族だけレベル範囲を変える
+ *   solo           : true なら、引かれたときにその1体だけの戦いになる
+ *   statMultiplier : その戦いのあいだだけ掛かる倍率（主と同じ仕組み。仲間にすると外れる）
  */
 (function (NS) {
   "use strict";
@@ -26,11 +34,6 @@
     this.floor = 1;             // 今いる階（perFloor の参照に使う）
     this._stepsSinceBattle = 0; // 戦闘後の経過歩数（連続遭遇の抑制に使用）
   }
-
-  /** 挑んでいるダンジョンを切り替える */
-  EncounterSystem.prototype.setDungeon = function (dungeon) {
-    this.dungeon = dungeon || null;
-  };
 
   /** 今いる階を伝える（階を降りるたびに呼ぶ） */
   EncounterSystem.prototype.setFloor = function (floor) {
@@ -97,7 +100,8 @@
    */
   EncounterSystem.prototype.createEnemyGroup = function () {
     var config = this.getEncounterConfig();
-    if (this.getTable().length === 0) return null;
+    var table = this.getTable();
+    if (table.length === 0) return null;
 
     var defaults = this.data.enemies || {};
     var fieldSize = (this.data.config || {}).battleFieldSize || 3;
@@ -105,28 +109,63 @@
             || config.groupSize || defaults.defaultGroupSize || { min: 1, max: 1 };
 
     var count = this.resolveGroupCount(size, fieldSize);
-    var group = [];
+    var allowed = this.tableForFloor(table);
+
+    // 先に「どの種族が出るか」だけを決める。
+    // 実体を作る前に決めるのは、solo を見つけたときに引き直さずに済ませるため
+    var picked = [];
     for (var i = 0; i < count; i++) {
-      var enemy = this.createEnemy();
+      var entry = pickByWeight(allowed, this.random);
+      if (entry) picked.push(entry);
+    }
+    if (picked.length === 0) return null;
+
+    // 単体でしか現れない種（solo）が混ざっていたら、その1体だけの戦いにする。
+    //
+    // 出会う確率は変わらない。変わるのは「出たときに何体で来るか」だけ。
+    // 竜のような特別な相手が雑魚と一緒に出ると、
+    // 推奨レベルでは勝ち目のない戦いになってしまうため。
+    var solo = null;
+    for (var s = 0; s < picked.length; s++) {
+      if (picked[s].solo) { solo = picked[s]; break; }
+    }
+    if (solo) picked = [solo];
+
+    var group = [];
+    for (var j = 0; j < picked.length; j++) {
+      var enemy = this.createEnemyFrom(picked[j]);
       if (enemy) group.push(enemy);
     }
     return group.length > 0 ? group : null;
   };
 
   /**
-   * 出現テーブルから敵を1体つくる。
+   * 出現テーブルの1エントリから敵を1体つくる。
+   *
+   * エントリに書けるもの（どちらも主と同じ仕組みなので、仲間にすると外れる）
+   *   statMultiplier … その戦いのあいだだけ強くする。
+   *                    「単体でしか出ないぶん、1体としては手強い」を作るのに使う
+   *   actionPattern  … 決まった順番で行動させる。主と同じ書き方（"wait" も使える）。
+   *                    門番のような相手を「読めば対処できる」形にできる
+   *
+   * @param {object} entry data/dungeons.js の table の1件
    * @returns {MyGame.MonsterInstance|null}
    */
-  EncounterSystem.prototype.createEnemy = function () {
-    var table = this.getTable();
-    if (table.length === 0) return null;
-
-    var entry = pickByWeight(this.tableForFloor(table), this.random);
+  EncounterSystem.prototype.createEnemyFrom = function (entry) {
     if (!entry) return null;
 
     var range = this.resolveLevelRange(entry);
     var level = this.random.nextInt(range.min, range.max);
-    return NS.MonsterInstance.create(entry.species, level, this.data, this.random);
+    var enemy = NS.MonsterInstance.create(entry.species, level, this.data, this.random);
+    if (!enemy) return null;
+
+    if (entry.statMultiplier && enemy.setEncounterMultipliers) {
+      enemy.setEncounterMultipliers(entry.statMultiplier);
+    }
+    if (entry.actionPattern && enemy.setActionPattern) {
+      enemy.setActionPattern(entry.actionPattern);
+    }
+    return enemy;
   };
 
   /**

@@ -63,19 +63,28 @@
     if (hovered >= 0) {
       this.index = hovered;
       if (input.getPointer && input.getPointer().clicked) {
-        var clicked = this.getSelected();
-        return { type: "confirm", value: clicked ? clicked.value : null };
+        return this._confirmResult(this.getSelected());
       }
     }
 
     if (input.isPressed("confirm")) {
-      var selected = this.getSelected();
-      return { type: "confirm", value: selected ? selected.value : null };
+      return this._confirmResult(this.getSelected());
     }
     if (input.isPressed("cancel")) {
       return { type: "cancel" };
     }
     return null;
+  };
+
+  /**
+   * 決定したときの返り値。
+   * disabled: true の項目（主戦の「逃げる」など、見せるが選べないもの）は
+   * type "disabled" で返す。呼び出し側は理由を知らせるだけでよい
+   */
+  CommandMenu.prototype._confirmResult = function (item) {
+    if (!item) return { type: "confirm", value: null };
+    if (item.disabled) return { type: "disabled", value: item.value };
+    return { type: "confirm", value: item.value };
   };
 
   /**
@@ -127,6 +136,20 @@
       w: this.rect.w,
       h: lineHeight
     };
+  };
+
+  /**
+   * 指定した value の項目が置かれている四角を返す（無ければ null）。
+   *
+   * チュートリアルが「この項目です」と矢印で指すために使う。
+   * 項目の並びは場面によって変わる（スカウトや交代が出たり出なかったり）ので、
+   * 位置ではなく value で引けるようにしてある。
+   */
+  CommandMenu.prototype.rectOfValue = function (value) {
+    for (var i = 0; i < this.items.length; i++) {
+      if (this.items[i].value === value) return this._itemRect(i);
+    }
+    return null;
   };
 
   /**

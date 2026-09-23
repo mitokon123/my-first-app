@@ -9,7 +9,7 @@
   NS.rawData.config = {
     gameTitle: "ABYSS CHRONICLE", // ゲーム名
     worldName: "Monstoria",       // 世界名
-    version: "α-5",     // バージョン表記（履歴は data/patchnotes.js）
+    version: "α-9",     // バージョン表記（履歴は data/patchnotes.js）
     canvasWidth: 800,   // 画面の横幅（px）
     canvasHeight: 600,  // 画面の縦幅（px）
     tileSize: 32,       // 1タイルの大きさ（px）
@@ -17,6 +17,13 @@
     storageMax: 30,     // 拠点の預かり所に預けられる数
     battleFieldSize: 3, // 戦闘盤面に同時に出せる数（味方・敵とも）
     abilityMax: 1,      // モンスター1体が持てる特性の数（超えた分は無視される）
-    equipMax: 1         // モンスター1体が身につけられる装備の数
+
+    /**
+     * 装備の枠。1体につきこの並びのぶんだけ着けられる。
+     * 各装備がどの枠かは data/items.js の equip.slot（weapon / armor / accessory）。
+     * 同じ種類の枠が2つあっても、**同じ装備を2つ着けることはできない**（Game.equipItem）。
+     * 枠の表示名・並びは data/categories.js の equipSlot。
+     */
+    equipSlots: ["weapon", "armor", "accessory", "accessory"]
   };
 })(window.MyGame);

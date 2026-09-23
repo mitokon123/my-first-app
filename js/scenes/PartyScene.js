@@ -101,6 +101,7 @@
     if (this.mode === "equip")   { this._updateEquipMode(input); return; }
     if (this.mode === "action")  { this._updateActionMode(input); return; }
     if (this.mode === "reorder") { this._updateReorderMode(input); return; }
+    if (this.mode === "inspect") { this._updateInspectMode(input); return; }
 
     this._moveCursor(input);
 
@@ -203,6 +204,9 @@
   PartyScene.prototype._buildActionItems = function () {
     var items = [];
 
+    // 何も変えない項目なので先頭に置く（間違えて押しても損がない）
+    items.push({ label: this.texts.actionInspect || "inspect", value: "inspect" });
+
     if (this.tab === "party") {
       // 探索中は預けられない（預かり所は拠点にある）
       if (this.allowStorage) {
@@ -230,12 +234,34 @@
     if (result.type !== "confirm") return;
 
     switch (result.value) {
+      case "inspect": this.mode = "inspect"; break;
       case "deposit": this._depositToStorage(); this.mode = "list"; break;
       case "take":    this._takeFromStorage();  this.mode = "list"; break;
       case "reorder": this._beginReorder(); break;
       case "equip":   this._beginEquip(); break;
       case "name":    this._beginNaming(); break;
     }
+  };
+
+  // --- 様子を見る ---
+
+  /**
+   * 眺めるだけの画面。何も変えない。
+   *
+   * 一覧の詳細欄は狭くて、絵も48pxしか出ない。
+   * ここでは画面いっぱいを使って、絵を大きく出し、
+   * 一覧では出しきれない**状態異常の耐性**まで並べる。
+   *
+   * ↑↓で他の仲間へそのまま移れる（いちいち一覧へ戻らなくてよい）。
+   */
+  PartyScene.prototype._updateInspectMode = function (input) {
+    var size = this._currentList().size();
+
+    if (size > 0) {
+      if (input.isPressed("up")) this.index = (this.index - 1 + size) % size;
+      if (input.isPressed("down")) this.index = (this.index + 1) % size;
+    }
+    if (input.isPressed("cancel") || input.isPressed("confirm")) this.mode = "list";
   };
 
   // --- 名前をつける ---
@@ -314,41 +340,71 @@
   };
 
   /**
-   * 装備の候補。いま着けているものは「外す」として先頭に置く。
+   * 装備の候補。枠（武器・防具・アクセサリー）ごとに見出しを挟んで並べる。
+   * 各枠の中では、いま着けているもの（外す用）を先に、持ち物の装備をそのあとに置く。
+   * 枠が埋まっている装備を選ぶと、その枠の古いものと入れ替わる（Game.equipItem）。
    * @returns {object[]} ScrollList の行
    */
   PartyScene.prototype._buildEquipRows = function (monster) {
     var rows = [];
     var t = this.theme;
-    var i;
-
-    // 着けているもの（外す用）
+    var data = this.game.data;
     var equipped = monster.equipment || [];
-    for (i = 0; i < equipped.length; i++) {
-      var worn = this.game.data.getItem(equipped[i]);
-      if (!worn) continue;
-      rows.push({
-        type: "entry",
-        label: worn.name,
-        right: this.texts.unequipLabel || "",
-        color: t.cursorColor,
-        value: { action: "unequip", index: i }
-      });
-    }
-
-    // 持ち物の中の装備品
     var slots = this.game.inventory.getSlots();
-    for (i = 0; i < slots.length; i++) {
-      var item = this.game.data.getItem(slots[i].itemId);
-      if (!item || !item.equip) continue;
+    var order = this._slotOrder();
+
+    for (var s = 0; s < order.length; s++) {
+      var slot = order[s];
+      var capacity = NS.EffectSystem.slotCapacity(data, slot);
+      var entries = [];
+      var i;
+
+      // 着けているもの（外す用）
+      for (i = 0; i < equipped.length; i++) {
+        var worn = data.getItem(equipped[i]);
+        if (!worn || NS.EffectSystem.slotOf(worn) !== slot) continue;
+        entries.push({
+          type: "entry",
+          label: worn.name,
+          right: this.texts.unequipLabel || "",
+          color: t.cursorColor,
+          value: { action: "unequip", index: i }
+        });
+      }
+      var wornCount = entries.length;
+
+      // 持ち物の中の、この枠の装備
+      for (i = 0; i < slots.length; i++) {
+        var item = data.getItem(slots[i].itemId);
+        if (!item || !item.equip || NS.EffectSystem.slotOf(item) !== slot) continue;
+        entries.push({
+          type: "entry",
+          label: item.name,
+          right: "x" + slots[i].count,
+          value: { action: "equip", itemId: item.id }
+        });
+      }
+      if (entries.length === 0) continue;
+
+      // 見出しに「何個中いくつ着けているか」を出す
       rows.push({
-        type: "entry",
-        label: item.name,
-        right: "x" + slots[i].count,
-        value: { action: "equip", itemId: item.id }
+        type: "header",
+        label: "- " + NS.EffectSystem.slotNameOf(slot, data) + " " + wornCount + "/" + capacity + " -",
+        color: t.subTextColor
       });
+      rows = rows.concat(entries);
     }
     return rows;
+  };
+
+  /** 枠の並び（重複を除いた data/config.js の equipSlots の順） */
+  PartyScene.prototype._slotOrder = function () {
+    var slots = (this.game.data.config || {}).equipSlots || [];
+    var order = [];
+    for (var i = 0; i < slots.length; i++) {
+      if (order.indexOf(slots[i]) < 0) order.push(slots[i]);
+    }
+    return order;
   };
 
   PartyScene.prototype._updateEquipMode = function (input) {
@@ -375,12 +431,23 @@
       var removed = this.game.unequipItem(monster, choice.index);
       this._notice = removed
         ? fill(this.texts.unequipped, { name: this.game.data.getItem(removed).name })
-        : (this.texts.inventoryFull || null);
+        : (this.texts.stackFull || null);
+      if (!removed) this.game.playError();
     } else {
       var item = this.game.data.getItem(choice.itemId);
-      this._notice = this.game.equipItem(monster, choice.itemId)
-        ? fill(this.texts.equipped, { name: monster.getName(), item: item.name })
-        : (this.texts.inventoryFull || null);
+      var result = this.game.equipItem(monster, choice.itemId);
+      if (result.success && result.replaced) {
+        var out = this.game.data.getItem(result.replaced);
+        this._notice = fill(this.texts.equipSwapped, { out: out ? out.name : result.replaced, item: item.name });
+      } else if (result.success) {
+        this._notice = fill(this.texts.equipped, { name: monster.getName(), item: item.name });
+      } else if (result.reason === "duplicate") {
+        this._notice = fill(this.texts.equipDuplicate, { item: item.name });
+        this.game.playError();
+      } else {
+        this._notice = this.texts.stackFull || null;
+        this.game.playError();
+      }
     }
 
     // 中身が変わったので作り直す（空になっても画面は開いたままにする）
@@ -402,6 +469,7 @@
 
     if (this.game.party.isFull()) {
       this._notice = this.texts.partyFull || null;
+      this.game.playError();
       return;
     }
 
@@ -420,6 +488,7 @@
     if (!party || party.size() <= 1) {
       // 最後の1体を預けると戦えなくなるので、預けさせない
       this._notice = this.texts.cannotStoreLast || null;
+      this.game.playError();
       return;
     }
 
@@ -428,6 +497,7 @@
 
     if (!this.game.depositToStorage(index)) {
       this._notice = this.texts.storageFull || null;
+      this.game.playError();
       return;
     }
 
@@ -458,6 +528,14 @@
     var t = this.theme;
 
     this.renderer.clear(L.background || "#000000", w, h);
+
+    // 様子を見ている間は画面ぜんぶを使う（一覧もタブも出さない）
+    if (this.mode === "inspect") {
+      this._renderInspect(this._currentList().get(this.index));
+      this._renderHint(L, t);
+      this.backButton.render();
+      return;
+    }
 
     this.panel.drawText(this.texts.title || "party",
       L.title.x, L.title.y, { font: t.largeFont });
@@ -544,7 +622,7 @@
 
     // 着けた（外した）ときにステータスがどう変わるか
     y += 6;
-    var changes = this._statChanges(monster, unequipping ? [] : [itemId]);
+    var changes = this._statChanges(monster, this._equipmentAfter(monster, selected.value));
 
     for (i = 0; i < changes.length; i++) {
       var change = changes[i];
@@ -558,6 +636,38 @@
         { align: "right", font: t.smallFont, color: color });
       y += lh;
     }
+  };
+
+  /**
+   * その選択をしたあとの装備の並び（実際には着け替えない。見せるためだけ）。
+   * Game.equipItem と同じ決まり：枠が埋まっていれば、その枠の古いものが外れる。
+   *
+   * @param {object} monster
+   * @param {{action:string, index?:number, itemId?:string}} choice
+   * @returns {string[]}
+   */
+  PartyScene.prototype._equipmentAfter = function (monster, choice) {
+    var list = (monster.equipment || []).slice();
+    if (choice.action === "unequip") {
+      list.splice(choice.index, 1);
+      return list;
+    }
+
+    var data = this.game.data;
+    var item = data.getItem(choice.itemId);
+    if (!item || list.indexOf(choice.itemId) >= 0) return list;   // 同じものは着けられない
+
+    var slot = NS.EffectSystem.slotOf(item);
+    var capacity = NS.EffectSystem.slotCapacity(data, slot);
+    var worn = [];
+    for (var i = 0; i < list.length; i++) {
+      var w = data.getItem(list[i]);
+      if (w && w.equip && NS.EffectSystem.slotOf(w) === slot) worn.push(list[i]);
+    }
+    if (worn.length >= capacity && worn.length > 0) list.splice(list.indexOf(worn[0]), 1);
+
+    list.push(choice.itemId);
+    return list;
   };
 
   /**
@@ -646,6 +756,7 @@
 
     var hint;
     if (this.mode === "equip") hint = this.texts.hintEquip;
+    else if (this.mode === "inspect") hint = this.texts.hintInspect;
     else if (this.mode === "action") hint = this.texts.hintAction;
     else if (this.mode === "reorder") hint = this.texts.hintReorder;
     else if (this.tab === "storage" && this.game.storage.isEmpty()) {
@@ -707,7 +818,14 @@
         { align: "right", color: divider.color || t.cursorColor, font: t.smallFont });
     }
 
-    this.panel.drawText(monster.getName() + "  Lv" + monster.level, textX, rect.y + 22);
+    var heading = monster.getName() + "  Lv" + monster.level;
+    this.panel.drawText(heading, textX, rect.y + 22);
+
+    // 掛かっている状態異常の印。戦闘中・ダンジョンの左上と同じ絵
+    this.panel.ctx.font = t.font || "14px monospace";
+    NS.StatusMarks.draw(this.panel, NS.StatusMarks.defsOf(monster),
+      textX + this.panel.ctx.measureText(heading).width + 8, rect.y + 22,
+      { maxX: rect.x + rect.w - 46, sprites: this.sprites, data: this.game.data });   // 右上の「出撃」の手前で止める
 
     // HPバーと数値（戦闘不能なら表示を変える）
     var barWidth = L.hpBarWidth || (rect.w - size - 40);
@@ -730,7 +848,9 @@
 
     var x = rect.x + (t.padding || 8);
     var y = rect.y + 22;
-    var lh = t.lineHeight || 18;
+    // 行間は中身の量から決める。技や装備が多い仲間で枠からはみ出さないよう、
+    // 入りきらないときだけ詰める（ふだんはテーマの行間のまま）
+    var lh = this._detailLineHeight(monster, rect);
 
     this.panel.drawText(monster.getName(), x, y);
     y += lh;
@@ -741,8 +861,16 @@
       x, y, { color: t.subTextColor, font: t.smallFont });
     y += lh;
 
-    this.panel.drawText("HP " + monster.currentHp + "/" + monster.getMaxHp(),
-      x, y, { color: t.subTextColor, font: t.smallFont });
+    var hpLine = "HP " + monster.currentHp + "/" + monster.getMaxHp();
+    this.panel.drawText(hpLine, x, y, { color: t.subTextColor, font: t.smallFont });
+
+    // 状態異常はHPの行の右に、名前のまま並べる。
+    //   一覧では1文字の印だが、こちらは詳細なので「毒」「呪い」と読める形で出す。
+    //   行を増やさないのは、この枠に技・特性・装備・耐性まで入っているため
+    this.panel.ctx.font = t.smallFont;
+    NS.StatusMarks.drawNames(this.panel, NS.StatusMarks.defsOf(monster),
+      x + this.panel.ctx.measureText(hpLine).width + 10, y,
+      { maxX: rect.x + rect.w - (t.padding || 8), sprites: this.sprites, data: this.game.data });
     y += lh;
 
     this.panel.drawText("PP " + monster.currentPp + "/" + monster.getMaxPp(),
@@ -791,26 +919,80 @@
       }
     }
 
-    // 装備
+    // 装備。狭い欄なので、着けているものだけ並べ、空き枠は数でまとめる
+    // （枠ごとの表示は「様子を見る」と着け替えの一覧にある）
     y += 4;
     this.panel.drawText(this.texts.equipLabel || "equipment", x, y, { font: t.smallFont });
     y += lh;
 
-    var equipped = monster.equipment || [];
-    if (equipped.length === 0) {
-      this.panel.drawText("・" + (this.texts.noEquip || "-"), x, y,
-        { color: t.hintColor, font: t.smallFont });
-      return;
+    var slotLines = this._equipSlotLines(monster);
+    var emptyCount = 0;
+    for (i = 0; i < slotLines.length; i++) {
+      if (slotLines[i].empty) { emptyCount++; continue; }
+      this.panel.drawText("・" + slotLines[i].text, x, y, { color: t.subTextColor, font: t.smallFont });
+      y += lh;
     }
-
-    for (i = 0; i < equipped.length; i++) {
-      var item = this.game.data.getItem(equipped[i]);
-      this.panel.drawText("・" + (item ? item.name : equipped[i]), x, y,
-        { color: t.subTextColor, font: t.smallFont });
+    if (emptyCount > 0) {
+      this.panel.drawText("・" + fill(this.texts.slotsEmpty || "空き {n}", { n: emptyCount }), x, y,
+        { color: t.hintColor, font: t.smallFont });
       y += lh;
     }
 
-    this._renderResistances(monster, x, y + 4, rect);
+    this._renderResistances(monster, x, y + 4, rect, lh);
+  };
+
+  /**
+   * 詳細欄の行間。全部の行が枠に収まる高さにする（上限はテーマの行間、下限 13px）。
+   * 数える行：名前・性格・HP・PP・攻・防・速・次まで（8）、技、特性、装備、耐性（見出し＋2列で4行）
+   */
+  PartyScene.prototype._detailLineHeight = function (monster, rect) {
+    var t = this.theme;
+    var base = t.lineHeight || 18;
+
+    var lines = 8;
+    lines += 1 + monster.skills.length;
+    var abilities = this._getAbilities(monster).length;
+    if (abilities > 0) lines += 1 + abilities;
+    var slots = this._equipSlotLines(monster);
+    var worn = 0, empty = 0;
+    for (var i = 0; i < slots.length; i++) { if (slots[i].empty) empty++; else worn++; }
+    lines += 1 + worn + (empty > 0 ? 1 : 0);
+    var elements = Object.keys(this.game.data.elements || {}).length - 1;   // 無属性を除く
+    lines += 1 + Math.ceil(Math.max(0, elements) / 2);
+
+    var gaps = 4 * 3 + 4;                     // 見出しの前の空き
+    var available = rect.h - 22 - 8 - gaps;   // 上の余白・下の余白
+    return Math.max(13, Math.min(base, Math.floor(available / lines)));
+  };
+
+  /**
+   * 装備を枠ごとに1行ずつ。「武器：灼牙の戦刃」「防具：-」のように、
+   * 空いている枠も出す（何が着けられるかが一目で分かるように）。
+   * @returns {Array<{text:string, empty:boolean}>}
+   */
+  PartyScene.prototype._equipSlotLines = function (monster) {
+    var data = this.game.data;
+    var empty = this.texts.slotEmpty || "-";
+    var slots = (data.config || {}).equipSlots || [];
+    var equipped = (monster.equipment || []).slice();
+    var lines = [];
+
+    for (var s = 0; s < slots.length; s++) {
+      var label = NS.EffectSystem.slotNameOf(slots[s], data) + "：";
+      var found = -1;
+      for (var i = 0; i < equipped.length; i++) {
+        var item = data.getItem(equipped[i]);
+        if (item && item.equip && NS.EffectSystem.slotOf(item) === slots[s]) { found = i; break; }
+      }
+      if (found >= 0) {
+        var worn = data.getItem(equipped[found]);
+        lines.push({ text: label + worn.name, empty: false, itemId: worn.id });
+        equipped.splice(found, 1);   // 同じ種類の2つ目の枠には次のものが入る
+      } else {
+        lines.push({ text: label + empty, empty: true });
+      }
+    }
+    return lines;
   };
 
   /**
@@ -821,11 +1003,11 @@
    *   足したあとの値なので、「着けたらどう変わるか」がこの画面で分かる。
    *   0（等倍）の属性も省かずに並べる —— 何が等倍なのかも知りたい情報のため。
    */
-  PartyScene.prototype._renderResistances = function (monster, x, y, rect) {
+  PartyScene.prototype._renderResistances = function (monster, x, y, rect, lineHeight) {
     if (!monster.getResistance) return;
 
     var t = this.theme;
-    var lh = t.lineHeight || 18;
+    var lh = lineHeight || t.lineHeight || 18;
     var elements = this.game.data.elements || {};
 
     // elements.js の order 順に並べる（図鑑や技一覧と同じ並び）
@@ -848,13 +1030,336 @@
       if (value > 0) color = t.hpBarFull || "#4fb0d1";
       else if (value < 0) color = t.hpBarLow || "#e8542a";
 
-      var text = element.name + " " + (value > 0 ? "+" : "") + value;
       var col = i % 2;
-      this.panel.drawText(text, x + col * colWidth, y,
-        { color: color, font: t.smallFont });
+      var cx = x + col * colWidth;
+      // 属性の絵を名前の前に置く（無い属性は文字だけ）
+      var tx = NS.StatusMarks.drawElement(this.sprites, this.game.data, ids[i], cx, y, { size: 12 });
+      if (tx > cx) tx += 3;
+
+      var text = element.name + " " + (value > 0 ? "+" : "") + value;
+      this.panel.drawText(text, tx, y, { color: color, font: t.smallFont });
 
       if (col === 1) y += lh;
     }
+  };
+
+  /**
+   * 「様子を見る」の画面。眺めるだけで、何も変えない。
+   *
+   * 左に絵（一覧の48pxではなく大きく出す。動きもそのまま）、
+   * 中央にステータスと装備、右に耐性を2種類ならべる。
+   *
+   * ★ 状態異常の耐性を出せるのはここだけ。
+   *   一覧の詳細欄には属性耐性までしか入らなかった。
+   */
+  PartyScene.prototype._renderInspect = function (monster) {
+    if (!monster) return;
+
+    var t = this.theme;
+    var L = this.layout.inspect || {};
+    var rect = L.box || { x: 32, y: 48, w: 736, h: 470 };
+    this.panel.drawBox(rect);
+
+    // --- 左：絵と名前 ---
+    var sp = L.sprite || { x: 128, y: 170, size: 128 };
+    var base = sp.size || 128;
+    var size = Math.round(base * (monster.getSizeScale ? monster.getSizeScale() : 1));
+    var spriteId = monster.getSpriteId();
+
+    this.sprites.drawMotion(spriteId,
+      sp.x - size / 2, sp.y - size / 2, size, size,
+      NS.Motion.forSprite(this.game.data, spriteId, monster.getMotionId(),
+        this.game.clock, monster.getMotionPhase()));
+
+    this.panel.drawText(monster.getName(), sp.x, (L.name || {}).y || 268,
+      { align: "center", font: t.largeFont });
+
+    var nature = monster.getNature();
+    this.panel.drawText("Lv" + monster.level + "　" + (nature ? nature.name : "-"),
+      sp.x, ((L.name || {}).y || 268) + 24,
+      { align: "center", font: t.smallFont, color: t.subTextColor });
+
+    // 左の下：技と特性（中央をステータスと装備に空けるため、こちらへ）
+    this._renderInspectSkills(monster, L.left || { x: 64, y: 316, lineHeight: 20 });
+
+    // --- 中央：ステータス・装備・装備の効果 ---
+    var mid = L.stats || { x: 268, y: 96, lineHeight: 22 };
+    this._renderInspectStats(monster, mid);
+
+    // --- 右：耐性2種 → その下に効果 ---
+    var right = L.resist || { x: 502, y: 96, lineHeight: 22, colWidth: 126 };
+    var y = this._renderResistTable(monster, right,
+      this.texts.resistanceLabel, this._elementRows(monster));
+    y = this._renderResistTable(monster, { x: right.x, y: y + 10,
+      lineHeight: right.lineHeight, colWidth: right.colWidth,
+      font: right.font, iconSize: right.iconSize },
+      this.texts.statusResistLabel, this._statusRows(monster));
+
+    var fx = L.effects || {};
+    this._renderEffectList(monster, {
+      x: right.x, y: y + (fx.gap === undefined ? 10 : fx.gap),
+      lineHeight: fx.lineHeight || 18,
+      font: fx.font || right.font, fromFont: fx.fromFont,
+      // 枠の内側まで。ここを越えるなら出どころの表記を省く
+      maxX: rect.x + rect.w - (t.padding || 10)
+    });
+  };
+
+  /** 様子を見る：左の下の、技と特性 */
+  PartyScene.prototype._renderInspectSkills = function (monster, pos) {
+    var t = this.theme;
+    var lh = pos.lineHeight || 20;
+    var x = pos.x, y = pos.y;
+    var i;
+
+    this.panel.drawText(this.texts.skillLabel || "", x, y, { font: t.smallFont });
+    y += lh;
+    for (i = 0; i < monster.skills.length; i++) {
+      var skill = this.game.data.getSkill(monster.skills[i]);
+      this.panel.drawText("・" + (skill ? skill.name : monster.skills[i]), x, y,
+        { font: t.smallFont, color: t.subTextColor });
+      y += lh;
+    }
+
+    var abilities = this._getAbilities(monster);
+    if (abilities.length === 0) return;
+    y += 6;
+    this.panel.drawText(this.texts.abilityLabel || "", x, y, { font: t.smallFont });
+    y += lh;
+    for (i = 0; i < abilities.length; i++) {
+      this.panel.drawText("・" + abilities[i].name, x, y, { font: t.smallFont, color: t.subTextColor });
+      y += lh;
+    }
+  };
+
+  /**
+   * 様子を見る：中央のステータス欄。
+   * 装備で上がった（下がった）ぶんは、値の隣に「(+8)」「(-2)」と出す。
+   * 装備を外した状態と比べているので、特性・加護のぶんは含まない（装備の効き目だけが見える）。
+   */
+  PartyScene.prototype._renderInspectStats = function (monster, pos) {
+    var t = this.theme;
+    var lh = pos.lineHeight || 22;
+    var font = pos.font || t.font;
+    var x = pos.x, y = pos.y;
+    var i;
+    var self = this;
+
+    var bare = this._statsWithout(monster);   // 装備なしのときの値
+
+    function statLine(text, value, baseValue) {
+      self.panel.drawText(text, x, y, { font: font, color: t.subTextColor });
+      var diff = value - baseValue;
+      if (diff !== 0) {
+        self.panel.ctx.font = font;
+        var w = self.panel.ctx.measureText(text).width;
+        self.panel.drawText("(" + (diff > 0 ? "+" : "") + diff + ")", x + w + 6, y,
+          { font: t.smallFont, color: diff > 0 ? (t.hpBarHigh || "#5fd18c") : (t.hpBarLow || "#e8542a") });
+      }
+      y += lh;
+    }
+
+    statLine("HP " + monster.currentHp + "/" + monster.getMaxHp(), monster.getMaxHp(), bare.hp);
+    statLine("PP " + monster.currentPp + "/" + monster.getMaxPp(), monster.getMaxPp(), bare.pp);
+    statLine((this.texts.attackLabel || "攻撃") + " " + monster.getAttack(), monster.getAttack(), bare.attack);
+    statLine((this.texts.defenseLabel || "防御") + " " + monster.getDefense(), monster.getDefense(), bare.defense);
+    statLine((this.texts.speedLabel || "素早さ") + " " + monster.getSpeed(), monster.getSpeed(), bare.speed);
+    this.panel.drawText((this.texts.expLabel || "次まで") + " " + (monster.getExpToNextLevel() - monster.exp),
+      x, y, { font: font, color: t.subTextColor });
+    y += lh + 6;
+
+    // 装備（枠ごと）。名前だけを並べる。
+    // 効果は1つずつ書かず、特性のぶんとまとめて右下の「効果」欄に出す
+    // （装備の下に並べると、4枠ぶんで欄が窮屈になっていた）
+    this.panel.drawText(this.texts.equipLabel || "", x, y, { font: font });
+    y += lh;
+    var slotLines = this._equipSlotLines(monster);
+    for (i = 0; i < slotLines.length; i++) {
+      this.panel.drawText("・" + slotLines[i].text, x, y,
+        { font: font, color: slotLines[i].empty ? t.hintColor : t.textColor });
+      y += lh;
+    }
+  };
+
+  /**
+   * 特性と装備から得ている効果を、ひとまとめにして並べる。
+   *
+   * ★ ステータスの加算（攻撃+3 など）と耐性の加算は入れない。
+   *   その2つは、すでに数値の隣に「(+15)」「(+5)」として出ている。
+   *   ここに並べると同じことを二度書くことになり、欄だけが伸びる。
+   *   出すのは**他では見えない効果**（倍率・与ダメージ・被ダメージ）だけ。
+   *
+   * @returns {{text:string, from:string}[]}
+   */
+  PartyScene.prototype._effectLines = function (monster) {
+    var gameData = this.game.data;
+    var lines = [];
+    var i, j;
+
+    function push(effects, from) {
+      for (var k = 0; k < (effects || []).length; k++) {
+        var effect = effects[k];
+        // 加算は数値の隣に出ているので、ここでは繰り返さない
+        if (effect.type === "statBonus" || effect.type === "resistBonus") continue;
+        var text = NS.EffectSystem.describeEffect(effect, gameData);
+        if (text) lines.push({ text: text, from: from });
+      }
+    }
+
+    var abilities = this._getAbilities(monster);
+    for (i = 0; i < abilities.length; i++) push(abilities[i].effects, abilities[i].name);
+
+    var equipment = monster.equipment || [];
+    for (j = 0; j < equipment.length; j++) {
+      var item = gameData.getItem(equipment[j]);
+      if (item) push((item.equip || {}).effects, item.name);
+    }
+    return lines;
+  };
+
+  /**
+   * 様子を見る：右下の「効果」欄。特性と装備でいま効いているものを並べる。
+   *
+   * 1行が「素早さ ×1.1（深淵の牙）」の形。どこから来ている効果かが分かると、
+   * 装備を外すか迷ったときに判断できる。
+   * 何も無いときは見出しごと出さない（空の見出しだけ残ると、壊れて見える）。
+   */
+  PartyScene.prototype._renderEffectList = function (monster, pos) {
+    var t = this.theme;
+    var lines = this._effectLines(monster);
+    if (lines.length === 0) return pos.y;
+
+    var lh = pos.lineHeight || 18;
+    var y = pos.y;
+
+    this.panel.drawText(this.texts.effectLabel || "", pos.x, y,
+      { font: pos.font || t.smallFont, color: t.cursorColor });
+    y += lh;
+
+    var font = pos.font || t.smallFont;
+    var fromFont = pos.fromFont || t.smallFont;
+
+    for (var i = 0; i < lines.length; i++) {
+      var text = lines[i].text;
+      this.panel.drawText(text, pos.x, y, { font: font, color: t.textColor });
+
+      // 出どころ（特性名・装備名）は、効果の後ろに薄く小さく。
+      // 「攻撃 ×1.5（HP25%以下のとき）」のように文が長いときは、はみ出すので出さない
+      // （どの効果が効いているか自体は、効果の文だけで分かる）
+      this.panel.ctx.font = font;
+      var w = this.panel.ctx.measureText(text).width;
+      this.panel.ctx.font = fromFont;
+      var from = "（" + lines[i].from + "）";
+      if (!pos.maxX || pos.x + w + 4 + this.panel.ctx.measureText(from).width <= pos.maxX) {
+        this.panel.drawText(from, pos.x + w + 4, y, { font: fromFont, color: t.hintColor });
+      }
+      y += lh;
+    }
+    return y;
+  };
+
+  /**
+   * 装備を全部外したときのステータス。「装備でいくつ上がっているか」を出すために使う。
+   * 一時的に外して計算し、必ず戻す（ステータスは呼ばれるたびに計算されるので、持ち主は変わらない）
+   */
+  PartyScene.prototype._statsWithout = function (monster) {
+    var original = monster.equipment;
+    monster.equipment = [];
+    try {
+      return {
+        hp: monster.getMaxHp(), pp: monster.getMaxPp(),
+        attack: monster.getAttack(), defense: monster.getDefense(), speed: monster.getSpeed()
+      };
+    } finally {
+      monster.equipment = original;
+    }
+  };
+
+  /** 属性耐性の行（並びは elements.js の order） */
+  PartyScene.prototype._elementRows = function (monster) {
+    var elements = this.game.data.elements || {};
+    var ids = Object.keys(elements).filter(function (id) { return id !== "none"; });
+    ids.sort(function (a, b) { return (elements[a].order || 0) - (elements[b].order || 0); });
+
+    // 装備で上がったぶん（bonus）は、装備を外した値と比べて出す
+    var bare = this._resistancesWithout(monster, ids, "element");
+    return ids.map(function (id, i) {
+      var value = monster.getResistance(id) || 0;
+      return { name: elements[id].name, icon: elements[id].icon || null,
+               value: value, bonus: value - bare[i] };
+    });
+  };
+
+  /** 状態異常耐性の行（並びは statuses.js に書いた順） */
+  PartyScene.prototype._statusRows = function (monster) {
+    var statuses = this.game.data.statuses || {};
+    if (!monster.getStatusResist) return [];
+
+    var ids = Object.keys(statuses);
+    var bare = this._resistancesWithout(monster, ids, "status");
+    return ids.map(function (id, i) {
+      var value = monster.getStatusResist(id) || 0;
+      return { name: statuses[id].name, icon: statuses[id].icon || null,
+               value: value, bonus: value - bare[i] };
+    });
+  };
+
+  /** 装備を全部外したときの耐性（属性 or 状態異常）。一時的に外して計算し、必ず戻す */
+  PartyScene.prototype._resistancesWithout = function (monster, ids, kind) {
+    var original = monster.equipment;
+    monster.equipment = [];
+    try {
+      return ids.map(function (id) {
+        return (kind === "status" ? monster.getStatusResist(id) : monster.getResistance(id)) || 0;
+      });
+    } finally {
+      monster.equipment = original;
+    }
+  };
+
+  /**
+   * 耐性を2列の表にして描く。属性でも状態異常でも同じ見た目にする。
+   * 強いところは青、弱いところは赤。等倍（0）は目立たせない。
+   * @returns {number} 描き終えたあとのy
+   */
+  PartyScene.prototype._renderResistTable = function (monster, pos, label, rows) {
+    var t = this.theme;
+    var lh = pos.lineHeight || 18;
+    var colWidth = pos.colWidth || 118;
+    var y = pos.y;
+
+    this.panel.drawText(label || "", pos.x, y, { font: pos.font || t.smallFont, color: t.cursorColor });
+    y += lh;
+
+    for (var i = 0; i < rows.length; i++) {
+      var v = rows[i].value;
+      var color = t.hintColor;
+      if (v > 0) color = t.hpBarFull || "#4fb0d1";
+      else if (v < 0) color = t.hpBarLow || "#e8542a";
+
+      var cx = pos.x + (i % 2) * colWidth;
+      // 名前の前に絵（属性・状態異常）。無いものは文字だけ
+      if (rows[i].icon) {
+        NS.StatusMarks.drawIcon(this.sprites, rows[i].icon, cx, y, pos.iconSize || 14);
+        cx += (pos.iconSize || 14) + 4;
+      }
+      var text = rows[i].name + " " + (v > 0 ? "+" : "") + v;
+      this.panel.drawText(text, cx, y, { color: color, font: pos.font || t.smallFont });
+
+      // 装備で動いたぶん。「(+3)」のように値の隣へ小さく
+      var bonus = rows[i].bonus || 0;
+      if (bonus !== 0) {
+        this.panel.ctx.font = pos.font || t.smallFont;
+        var w = this.panel.ctx.measureText(text).width;
+        this.panel.drawText("(" + (bonus > 0 ? "+" : "") + bonus + ")", cx + w + 4, y,
+          { font: t.smallFont, color: bonus > 0 ? (t.hpBarHigh || "#5fd18c") : (t.hpBarLow || "#e8542a") });
+      }
+
+      if (i % 2 === 1) y += lh;
+    }
+    // 奇数個で終わったら、その行ぶんを送る
+    if (rows.length % 2 === 1) y += lh;
+    return y;
   };
 
   /** そのモンスターが実際に持っている特性の定義を並べる（1体あたりの上限を反映） */

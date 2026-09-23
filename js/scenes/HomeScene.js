@@ -41,10 +41,11 @@
       this.layout.particles, game.canvas.width, game.canvas.height
     );
 
-    this.saveManager = new NS.SaveManager(game.data);
     this.random = new NS.Random();
 
     this.notice = new NS.Notice(this.theme.notice);
+    // 初めての場面で出る説明（出ているあいだはメニューを操作できない）
+    this.tutorial = new NS.TutorialBox(this.panel, game);
 
     // 画面に出している所持金。実際の額へ向かって少しずつ動かす
     this._shownGold = null;
@@ -96,6 +97,10 @@
   };
 
   HomeScene.prototype.enter = function () {
+    // 拠点まわりの画面（仲間・持ち物・設定…）から戻ってきても、
+    // 同じidなので曲は流れたまま途切れない。
+    // 店と工房だけは自分の曲を持つので、戻るとここで拠点の曲に戻る
+    this.game.audio.playBgm("home");
     this._ensureParty();
     // 戻ってくるたびに組み直す（クリアして使えるようになった項目を反映するため）
     this._buildMenu();
@@ -104,6 +109,12 @@
     if (this._pendingNotice) {
       this._showNotice(this._pendingNotice, RETURN_NOTICE_DURATION);
       this._pendingNotice = null;
+    }
+
+    // 初めて拠点を開いたときの説明。
+    // 知らせを出したときは重ならないよう、次に開いたときへ回す
+    if (this.game.tutorial && !this.notice.isActive()) {
+      this.tutorial.show(this.game.tutorial.take("homeReturn"));
     }
   };
 
@@ -114,6 +125,12 @@
     this._updateGold();
 
     this.notice.update(dt);
+
+    // 説明を出している間はメニューを触らせない
+    if (this.tutorial.isActive()) {
+      this.tutorial.handleInput(this.game.input);
+      return;
+    }
 
     var result = this.menu.handleInput(this.game.input);
     if (!result) return;
@@ -133,12 +150,14 @@
     if (selected.ready === false) {
       var template = this.texts.comingSoon || "{name}";
       this._showNotice(template.replace("{name}", selected.label));
+      this.game.playError();
       return;
     }
 
     // まだ使えない項目は、何をすれば使えるかを知らせる
     if (selected.locked) {
       this._showNotice(this._lockedMessage(selected));
+      this.game.playError();
       return;
     }
 
@@ -185,6 +204,9 @@
       case "dex":
         this.game.scenes.change(new NS.DexScene(this.game, this));
         break;
+      case "help":
+        this.game.scenes.change(new NS.HelpScene(this.game, this));
+        break;
       case "save":
         this._save();
         break;
@@ -195,25 +217,11 @@
   };
 
   /**
-   * 拠点からのセーブ。
-   * マップは保存しないため、再開時はダンジョンが生成し直される。
+   * 拠点からのセーブ。書き込む先のファイルを選ぶ画面へ。
+   * 実際に書くのは SaveSlotScene（mode "save"）。書けたら音が鳴り、ここへ戻ってくる
    */
   HomeScene.prototype._save = function () {
-    var result = this.saveManager.save({
-      floor: 1,
-      party: this.game.party,
-      storage: this.game.storage,
-      inventory: this.game.inventory,
-      gold: this.game.gold,
-      discovery: this.game.discovery,
-      clearedDungeons: this.game.clearedDungeons,
-      boughtBlessings: this.game.boughtBlessings,
-      offBlessings: this.game.offBlessings,
-      dungeon: null
-    });
-
-    var saveTexts = (this.game.data.messages || {}).save || {};
-    this._showNotice(saveTexts[result.reason] || result.reason);
+    this.game.scenes.change(new NS.SaveSlotScene(this.game, this, "save"));
   };
 
   /**
@@ -258,6 +266,7 @@
     this._renderPartyStatus();
     this._renderNotice(ctx);
     this._renderHint(ctx);
+    this.tutorial.render();
   };
 
   /**

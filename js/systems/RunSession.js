@@ -97,9 +97,5 @@
     return this.gainedMonsters;
   };
 
-  RunSession.prototype.hasGains = function () {
-    return this.getGainedItems().length > 0 || this.gainedMonsters.length > 0;
-  };
-
   NS.RunSession = RunSession;
 })(window.MyGame);

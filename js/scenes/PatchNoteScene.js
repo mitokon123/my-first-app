@@ -41,13 +41,40 @@
 
     this.index = 0;       // 選んでいるバージョン
     this.scroll = 0;      // 内容の表示開始行
+    this.listTop = 0;     // バージョン一覧の表示開始位置
     this.focus = "list";  // "list"（バージョンを選ぶ）/ "notes"（内容を読む）
   }
 
   PatchNoteScene.prototype.enter = function () {
     this.index = 0;
     this.scroll = 0;
+    this.listTop = 0;
     this.focus = "list";
+  };
+
+  /**
+   * バージョン一覧に一度に出せる行数。
+   *
+   * ★ 書いていなければ枠の高さから計算する。
+   *   バージョンは増え続けるので、**入りきらない前提**で作ってある。
+   *   これが無かったころは、8個目から枠の外へはみ出して
+   *   下の操作説明に重なっていた。
+   */
+  PatchNoteScene.prototype._visibleVersions = function () {
+    var L = this.layout.list;
+    if (L.visibleRows) return L.visibleRows;
+    return Math.max(1, Math.floor((L.h - 10) / L.rowHeight));
+  };
+
+  /** 選んでいるバージョンが見えるように、表示開始位置をずらす */
+  PatchNoteScene.prototype._scrollListToIndex = function () {
+    var visible = this._visibleVersions();
+
+    if (this.index < this.listTop) this.listTop = this.index;
+    if (this.index >= this.listTop + visible) this.listTop = this.index - visible + 1;
+
+    var maxTop = Math.max(0, this.versions.length - visible);
+    this.listTop = Math.max(0, Math.min(maxTop, this.listTop));
   };
 
   PatchNoteScene.prototype.getSelected = function () {
@@ -101,6 +128,7 @@
 
     // 別のバージョンを選んだら、内容は先頭から読み直す
     if (this.index !== before) this.scroll = 0;
+    this._scrollListToIndex();
 
     if (input.isPressed("confirm") || input.isPressed("right")) this.focus = "notes";
   };
@@ -125,9 +153,15 @@
     if (!pointer.inside) return -1;
     if (!pointer.moved && !pointer.clicked) return -1;
 
+    // 出ている行だけを見る（送った先の見えていない行は押せない）
     var L = this.layout.list;
-    for (var i = 0; i < this.versions.length; i++) {
-      var rect = { x: L.x, y: L.y + L.rowHeight * i, w: L.w, h: L.rowHeight - 4 };
+    var end = Math.min(this.versions.length, this.listTop + this._visibleVersions());
+
+    for (var i = this.listTop; i < end; i++) {
+      var rect = {
+        x: L.x, y: L.y + L.rowHeight * (i - this.listTop),
+        w: L.w, h: L.rowHeight - 4
+      };
       if (NS.Panel.containsPoint(rect, pointer)) return i;
     }
     return -1;
@@ -230,12 +264,17 @@
     var L = this.layout.list;
     var t = this.theme;
 
-    this.panel.drawBox({ x: L.x, y: L.y - 10, w: L.w, h: L.h });
+    var box = { x: L.x, y: L.y - 10, w: L.w, h: L.h };
+    this.panel.drawBox(box);
 
-    for (var i = 0; i < this.versions.length; i++) {
+    // 出す行だけを描く。バージョンが増えても枠からはみ出さない
+    var visible = this._visibleVersions();
+    var end = Math.min(this.versions.length, this.listTop + visible);
+
+    for (var i = this.listTop; i < end; i++) {
       var version = this.versions[i];
       var selected = (i === this.index);
-      var y = L.y + L.rowHeight * i;
+      var y = L.y + L.rowHeight * (i - this.listTop);
 
       if (selected) {
         this.panel.ctx.fillStyle = this.layout.selectedBg || "rgba(74,107,168,0.3)";
@@ -246,8 +285,19 @@
         { color: selected ? t.cursorColor : t.textColor });
       this.panel.drawText(version.date || "", L.x + L.w - 12, y + 20,
         { align: "right", font: t.smallFont, color: t.hintColor });
-      this.panel.drawText(version.summary || "", L.x + 12, y + 38,
-        { font: t.smallFont, color: t.subTextColor });
+      // ひとこと説明は枠より長くなることがあるので、はみ出すぶんは「…」で切る
+      this.panel.drawText(clipText(this.panel, version.summary || "", L.w - 24, t.smallFont),
+        L.x + 12, y + 38, { font: t.smallFont, color: t.subTextColor });
+    }
+
+    // 上下に続きがあることを示す
+    if (this.listTop > 0) {
+      this.panel.drawText("▲", L.x + L.w - 18, box.y + 16,
+        { font: t.smallFont, color: t.hintColor });
+    }
+    if (end < this.versions.length) {
+      this.panel.drawText("▼", L.x + L.w - 18, box.y + L.h - 8,
+        { font: t.smallFont, color: t.hintColor });
     }
   };
 
@@ -324,6 +374,30 @@
   /** 値を範囲内に収める */
   function clamp(value, min, max) {
     return Math.max(min, Math.min(max, value));
+  }
+
+  /**
+   * 決められた幅に収まるよう、はみ出すぶんを「…」に置き換える。
+   *
+   * 文字数ではなく**実際に測った幅**で切る。
+   * 全角と半角が混ざる（「α-1」と日本語）ので、文字数では合わないため。
+   */
+  function clipText(panel, text, maxWidth, font) {
+    var ctx = panel.ctx;
+    ctx.save();
+    ctx.font = font || panel.theme.smallFont || "12px monospace";
+
+    if (ctx.measureText(text).width <= maxWidth) {
+      ctx.restore();
+      return text;
+    }
+
+    var cut = text;
+    while (cut.length > 1 && ctx.measureText(cut + "…").width > maxWidth) {
+      cut = cut.slice(0, -1);
+    }
+    ctx.restore();
+    return cut + "…";
   }
 
   /** 文字数で折り返す（等幅フォント前提の簡易処理） */

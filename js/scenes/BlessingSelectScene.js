@@ -124,6 +124,7 @@
     if (!result.changed) {
       this._showNotice(fill(this.texts[result.reason] || result.reason,
         { max: this.game.getBlessingActiveMax() }));
+      this.game.playError();
       return;
     }
 
@@ -140,7 +141,7 @@
   BlessingSelectScene.prototype._focus = function (blessingId) {
     for (var i = 0; i < this.list.rows.length; i++) {
       if (this.list.rows[i].value === blessingId) {
-        this.list.index = i;
+        this.list.setIndex(i);
         return;
       }
     }
@@ -163,6 +164,7 @@
     this._renderCount();
     this.list.render(this.game.clock);
     this._renderDetail();
+    this._renderTierSummary();
     this._renderHint();
 
     this._renderNotice();
@@ -229,7 +231,7 @@
     this.panel.drawText(blessing.name, origin.x, y);
     y += lh + 4;
 
-    // 出やすさ（data/run.js の rarityLabels）
+    // 出やすさ（data/run.js の rarityTiers）
     var rarity = NS.BlessingSystem.getRarity(this.game.data, blessing);
     this.panel.drawText((this.texts.rarityLabel || "") + " " + rarity.label, origin.x, y,
       { font: t.smallFont, color: rarity.color || t.subTextColor });
@@ -247,6 +249,58 @@
     this.panel.drawText(active ? (this.texts.stateOn || "") : (this.texts.stateOff || ""),
       origin.x, y,
       { font: t.smallFont, color: active ? (t.cursorColor || "#ffd75e") : t.hintColor });
+  };
+
+  /**
+   * 等級ごとに何個入れているかの一覧。
+   *
+   * ★ この画面でいちばん大事な情報。
+   *   選択肢の枠は「等級を引いてから中身を選ぶ」順で作るので、
+   *   0個の等級があると、その枠は空のまま出てこない（BlessingSystem を参照）。
+   *   数字を出しておかないと、なぜ選択肢が2つしか出ないのか分からない。
+   *
+   * 0個の等級は赤で出して、埋めるべき穴だと分かるようにする。
+   */
+  BlessingSelectScene.prototype._renderTierSummary = function () {
+    var pos = this.layout.tierSummary;
+    var tiers = (((this.game.data.run || {}).blessing) || {}).rarityTiers || [];
+    if (!pos || tiers.length === 0) return;
+
+    var t = this.theme;
+    var counts = this._countByTier(tiers);
+    var lh = pos.lineHeight || 16;
+
+    this.panel.drawText(this.texts.tierLabel || "", pos.x, pos.y,
+      { font: t.smallFont, color: t.subTextColor });
+
+    for (var i = 0; i < tiers.length; i++) {
+      var empty = (counts[i] === 0);
+      var rate = Math.round((tiers[i].rate || 0) * 100);
+
+      this.panel.drawText(
+        fill(this.texts.tierRow, { name: tiers[i].label, rate: rate, count: counts[i] }),
+        pos.x, pos.y + lh * (i + 1),
+        { font: t.smallFont, color: empty ? (t.hpBarLow || "#e8542a") : (tiers[i].color || t.textColor) });
+    }
+  };
+
+  /** 等級ごとに、いま選択肢に入れている数を数える */
+  BlessingSelectScene.prototype._countByTier = function (tiers) {
+    var counts = [];
+    var i;
+    for (i = 0; i < tiers.length; i++) counts.push(0);
+
+    var ids = this.game.getOwnedBlessingIds();
+    for (i = 0; i < ids.length; i++) {
+      if (!this.game.isBlessingActive(ids[i])) continue;
+
+      var blessing = (this.game.data.blessings || {})[ids[i]];
+      var rarity = NS.BlessingSystem.getRarity(this.game.data, blessing);
+      for (var k = 0; k < tiers.length; k++) {
+        if (tiers[k].label === rarity.label) { counts[k]++; break; }
+      }
+    }
+    return counts;
   };
 
   BlessingSelectScene.prototype._renderHint = function () {

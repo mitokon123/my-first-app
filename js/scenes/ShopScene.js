@@ -55,6 +55,9 @@
   }
 
   ShopScene.prototype.enter = function () {
+    // 店の曲。拠点へ戻ると拠点の曲に戻る（HomeScene.enter）
+    this.game.audio.playBgm("shop");
+
     // クリア状況が変わっていると開く店が増えるので、開くたびに数え直す
     this.shops = this.shop.getShops(this.game.clearedDungeons);
     if (this.shopIndex >= this.shops.length) this.shopIndex = 0;
@@ -111,9 +114,14 @@
       rows.push({
         type: "entry",
         label: blessing.name,
-        right: owned ? (this.texts.owned || "所持") : (blessing.price + "G"),
+        right: owned ? (this.texts.blessingOwned || "所持")
+                     : fill(this.texts.blessingPrice, { price: blessing.price || 0 }),
         color: owned ? t.hintColor : (affordable ? t.textColor : t.hintColor),
-        value: owned ? null : { blessingId: id, price: blessing.price || 0 }
+        // 買えないもの（もう持っている）は value を持たせない。
+        // 決定を押しても何も起きなくなる（_updateList が value を見ている）
+        value: owned ? null : { blessingId: id, price: blessing.price || 0 },
+        // 説明を出すためのid。買ったあとも読めるよう value とは別に持つ
+        blessingId: id
       });
     }
 
@@ -250,6 +258,7 @@
     // 1個もやりとりできないなら、理由を出して一覧のままにする
     if (max <= 0) {
       this._showNotice(this._blockedReason(mode, choice));
+      this.game.playError();
       return;
     }
 
@@ -262,16 +271,24 @@
   /** 1個もやりとりできない理由 */
   ShopScene.prototype._blockedReason = function (mode, choice) {
     if (mode === "sell") return this.texts.notOwned;
-    return this.game.canAfford(choice.price) ? this.texts.inventoryFull : this.texts.notEnoughGold;
+    return this.game.canAfford(choice.price) ? this.texts.stackFull : this.texts.notEnoughGold;
   };
 
+  /**
+   * 個数を決める。
+   *
+   * ★ 左右が1つずつ、上下がまとめて（quantityStep）。
+   *   画面には「◀ 3 ▶」と横向きの矢印が出ているので、
+   *   左右を押したときに10ずつ動くと、矢印の見た目と合わない。
+   *   細かく合わせるのが左右、大きく動かすのが上下。
+   */
   ShopScene.prototype._updateQuantity = function (input) {
     var step = this.layout.quantityStep || 10;
 
-    if (input.isPressed("up")) this._changeCount(1);
-    if (input.isPressed("down")) this._changeCount(-1);
-    if (input.isPressed("right")) this._changeCount(step);
-    if (input.isPressed("left")) this._changeCount(-step);
+    if (input.isPressed("right")) this._changeCount(1);
+    if (input.isPressed("left")) this._changeCount(-1);
+    if (input.isPressed("up")) this._changeCount(step);
+    if (input.isPressed("down")) this._changeCount(-step);
 
     if (input.isPressed("cancel")) {
       this.phase = "list";
@@ -344,9 +361,11 @@
       if (!this.game.isBlessingActive(this.order.blessingId)) {
         text += this.texts.blessingFull || "";
       }
+      // 加護は「お金が動いた」音ではなく、決定音（Game が鳴らす）だけ
       this._showNotice(text);
     } else {
       this._showNotice(this.texts[result.reason] || result.reason);
+      this.game.playError();
     }
 
     this.order = null;
@@ -450,7 +469,7 @@
   ShopScene.prototype._refreshList = function () {
     var index = this.list.index;
     this._rebuildList();
-    if (index < this.list.rows.length) this.list.index = index;
+    if (index < this.list.rows.length) this.list.setIndex(index);
   };
 
   ShopScene.prototype._buy = function () {
@@ -462,6 +481,8 @@
     this._showNotice(result.success
       ? fill(this.texts.bought, { name: item.name, count: result.count, price: result.gold })
       : (this.texts[result.reason] || result.reason));
+    if (result.success) this.game.audio.playSe("buy");
+    else this.game.playError();
 
     this.order = null;
     this.phase = "list";
@@ -477,6 +498,9 @@
     this._showNotice(result.success
       ? fill(this.texts.sold, { name: item.name, count: result.count, price: result.gold })
       : (this.texts[result.reason] || result.reason));
+    // 売るときも買うときと同じ「お金が動いた」音
+    if (result.success) this.game.audio.playSe("buy");
+    else this.game.playError();
 
     this.order = null;
     this.phase = "list";
@@ -550,13 +574,23 @@
         y += 8;
       }
     } else {
-      // 個数（増減できることが分かるよう ◀▶ を添える）
+      // 個数。
+      // 左右で1つずつ、上下でまとめて動くことが見て分かるよう、
+      // 数字の左右に ◀▶、その上下に ▲▼ を添える
+      var step = this.layout.quantityStep || 10;
+      var countRight = rect.x + rect.w - (t.padding || 8);
+
       this.panel.drawText(this.texts.countLabel || "", origin.x, y,
         { font: t.smallFont, color: t.subTextColor });
-      this.panel.drawText("◀ " + this.order.count + " ▶",
-        rect.x + rect.w - (t.padding || 8), y,
+
+      this.panel.drawText("▲" + step, countRight, y - lh + 4,
+        { align: "right", font: t.smallFont, color: t.hintColor });
+      this.panel.drawText("◀ " + this.order.count + " ▶", countRight, y,
         { align: "right", color: t.cursorColor });
-      y += lh + 2;
+      this.panel.drawText("▼" + step, countRight, y + lh - 4,
+        { align: "right", font: t.smallFont, color: t.hintColor });
+
+      y += lh * 2 - 2;
 
       this.panel.drawText(fill(this.texts.maxCount, { max: this.order.max }), origin.x, y,
         { font: t.smallFont, color: t.hintColor });
@@ -682,6 +716,15 @@
       return;
     }
 
+    // 謎の商人が並べているのはアイテムではないので、別に描く
+    if (selected.blessingId) {
+      this._renderBlessingDetail(rect, selected.blessingId);
+      return;
+    }
+
+    // 選べるが買えない行（もう持っている加護など）は value を持たない
+    if (!selected.value) return;
+
     var item = this.game.data.getItem(selected.value.itemId);
     if (!item) return;
 
@@ -711,12 +754,13 @@
       y += lh;
     }
 
-    // 装備なら効果も出す
+    // 装備なら枠と効果も出す
     if (!item.equip) return;
 
     y += 6;
-    this.panel.drawText(this.texts.effectLabel || "", origin.x, y,
-      { font: t.smallFont, color: t.cursorColor });
+    this.panel.drawText((this.texts.effectLabel || "")
+        + "（" + NS.EffectSystem.slotName(item, this.game.data) + "）",
+      origin.x, y, { font: t.smallFont, color: t.cursorColor });
     y += lh;
 
     var effects = item.equip.effects || [];
@@ -725,6 +769,51 @@
         { font: t.smallFont, color: t.subTextColor });
       y += lh;
     }
+  };
+
+  /**
+   * 謎の商人の説明欄。並んでいるのは加護なので、アイテムとは中身が違う。
+   *
+   * 買う前は値段、買ったあとは「所持」を出す。
+   * 買ったあとも説明が読めるようにしてあるのは、
+   * 「何を買ったのか」をこの画面で確かめられるようにするため。
+   */
+  ShopScene.prototype._renderBlessingDetail = function (rect, blessingId) {
+    var blessing = (this.game.data.blessings || {})[blessingId];
+    if (!blessing) return;
+
+    var t = this.theme;
+    var origin = this.panel.innerOrigin(rect);
+    var lh = t.lineHeight || 18;
+    var y = origin.y + 20;
+    var owned = this.game.hasBoughtBlessing(blessingId);
+
+    this.panel.drawText(blessing.name, origin.x, y);
+    y += lh + 4;
+
+    this.panel.drawText(
+      owned ? (this.texts.blessingOwned || "")
+            : fill(this.texts.blessingPrice, { price: blessing.price || 0 }),
+      origin.x, y,
+      { font: t.smallFont, color: owned ? t.subTextColor : t.cursorColor });
+    y += lh + 6;
+
+    var lines = wrapText(blessing.description || "", rect.charsPerLine || 18);
+    for (var i = 0; i < lines.length; i++) {
+      this.panel.drawText(lines[i], origin.x, y, { font: t.smallFont, color: t.subTextColor });
+      y += lh - 2;
+    }
+
+    // 買ってあるものは、いま選択肢に入っているかどうかまで出す
+    // （上限があるので、買ったのに出てこない加護がありうる）
+    if (!owned) return;
+
+    y += 8;
+    this.panel.drawText(
+      this.game.isBlessingActive(blessingId)
+        ? (this.texts.blessingActive || "")
+        : (this.texts.blessingInactive || ""),
+      origin.x, y, { font: t.smallFont, color: t.hintColor });
   };
 
   /** 装備の効果1つを文章にする（組み立ては EffectSystem に任せる） */

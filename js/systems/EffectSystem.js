@@ -6,7 +6,8 @@
  *   特性（アビリティ）… 種族が持つもの。AbilitySystem が「どれが効くか」を決める
  *   装備             … 個体が身につけているもの（data/items.js の equip）
  *   加護（ラン限定）  … 階を降りるたびに選んだもの。個体の runEffects に入っている
- *   主の補正         … ボスとして出ているあいだだけ。個体の bossEffects に入っている
+ *   その戦いの補正     … 敵として出ているあいだだけ。個体の encounterEffects に入っている
+ *                      （主の statMultiplier と、特殊な出方をする在来種の両方）
  *   バフ／デバフ      … 技でかかるもの。個体の modifiers に入っている（戦闘のあいだだけ）
  *
  * 出どころが増えても collectEffects に1つ足すだけでよく、
@@ -61,10 +62,11 @@
       effects = effects.concat(monster.runEffects);
     }
 
-    // 主としての補正（data/bosses.js の statMultiplier）。
+    // その戦いのあいだだけの補正。
+    // 主の statMultiplier と、特殊な出方をする在来種（竜など）の両方がここに入る。
     // 敵として立ちはだかっている個体にだけ付いていて、仲間にすると外れる
-    if (monster.bossEffects && monster.bossEffects.length > 0) {
-      effects = effects.concat(monster.bossEffects);
+    if (monster.encounterEffects && monster.encounterEffects.length > 0) {
+      effects = effects.concat(monster.encounterEffects);
     }
 
     // バフ／デバフ（その戦闘のあいだだけ）。ターン数で切れ、戦闘終了で消える
@@ -73,12 +75,23 @@
       effects = effects.concat(modifiers[i].effects || []);
     }
 
+    // 状態異常。data/statuses.js に effects を書いたものだけが効く（いまは呪いだけ）。
+    // 書き方はバフ／デバフとまったく同じなので、ダメージ計算側は何も変えなくてよい
+    var statuses = monster.getStatusDefs ? monster.getStatusDefs() : [];
+    for (i = 0; i < statuses.length; i++) {
+      effects = effects.concat(statuses[i].effects || []);
+    }
+
     return effects;
   };
 
   /**
    * 身につけている装備の定義を並べて返す。
-   * 1体が着けられる数は data/config.js の equipMax まで。
+   *
+   * 枠は data/config.js の equipSlots。枠ごとの数を超えたぶんと、
+   * 同じ装備の2つ目は効かない（着ける側の Game.equipItem でも止めているが、
+   * データを直に触られても壊れないよう、ここでも守る）。
+   *
    * @param {object} monster
    * @returns {object[]} data/items.js のエントリ
    */
@@ -86,15 +99,49 @@
     var ids = (monster && monster.equipment) || [];
     if (typeof ids === "string") ids = [ids];   // 1つだけ持たせた場合も扱えるように
 
-    var limit = (this.data.config || {}).equipMax;
-    if (typeof limit !== "number") limit = ids.length;
-
+    var used = {};    // 枠id → 使った数
+    var seen = {};    // 装備id → 既に数えたか
     var result = [];
-    for (var i = 0; i < ids.length && result.length < limit; i++) {
+
+    for (var i = 0; i < ids.length; i++) {
       var item = this.data.getItem(ids[i]);
-      if (item && item.equip) result.push(item);
+      if (!item || !item.equip || seen[ids[i]]) continue;
+
+      var slot = EffectSystem.slotOf(item);
+      var count = used[slot] || 0;
+      if (count >= EffectSystem.slotCapacity(this.data, slot)) continue;
+
+      used[slot] = count + 1;
+      seen[ids[i]] = true;
+      result.push(item);
     }
     return result;
+  };
+
+  /** その装備の枠id。書いていない装備はアクセサリー扱い */
+  EffectSystem.slotOf = function (item) {
+    return (item && item.equip && item.equip.slot) || "accessory";
+  };
+
+  /** その装備の枠の表示名（data/categories.js の equipSlot）。無ければ id のまま */
+  EffectSystem.slotName = function (item, gameData) {
+    return EffectSystem.slotNameOf(EffectSystem.slotOf(item), gameData);
+  };
+
+  /** 枠id → 表示名 */
+  EffectSystem.slotNameOf = function (slot, gameData) {
+    var defs = ((gameData.categories || {}).equipSlot) || {};
+    return (defs[slot] && defs[slot].name) || slot;
+  };
+
+  /** その枠が何個あるか（data/config.js の equipSlots を数える） */
+  EffectSystem.slotCapacity = function (gameData, slot) {
+    var slots = (gameData.config || {}).equipSlots || [];
+    var count = 0;
+    for (var i = 0; i < slots.length; i++) {
+      if (slots[i] === slot) count++;
+    }
+    return count;
   };
 
   // --- 集計 ---
@@ -134,15 +181,37 @@
   };
 
   /**
-   * 属性への耐性そのものへの加算（何も無ければ 0）。
+   * 耐性そのものへの加算（何も無ければ 0）。
    * 倍率ではなく「耐性の数値」を動かすので、
-   * data/monsters.js の resistances に書いたのと同じ重みで効く。
+   * data/monsters.js の resistances / statusResist に書いたのと同じ重みで効く。
+   *
+   * ▼ 属性と状態異常を1つの効果型で扱う
+   *   { type:"resistBonus", element:"fire",  value:3 }  … 火への耐性 +3
+   *   { type:"resistBonus", status:"poison", value:7 }  … 毒への耐性 +7
+   *
+   *   ★ どちらを書いたかで効く先が決まる。
+   *     element を書いた効果は状態異常には効かず、status を書いた効果は属性に効かない。
+   *     これを分けないと、炎よけの札が毒にも効いてしまう。
+   *   ★ どちらも書かない resistBonus は、その種類すべてに効く（全属性・全状態異常）。
+   *
+   * @param {object} monster
+   * @param {string} id 属性id または 状態異常id
+   * @param {string} [kind] "status" なら状態異常として引く（省略時は属性）
    */
-  EffectSystem.prototype.getResistBonus = function (monster, elementId) {
+  EffectSystem.prototype.getResistBonus = function (monster, id, kind) {
     var self = this;
+    var wantStatus = (kind === "status");
+
     return this._sum(monster, function (effect) {
       if (effect.type !== "resistBonus") return null;
-      if (effect.element && effect.element !== elementId) return null;
+
+      // 種類違いを弾く（炎よけの札が毒に効かないように）
+      if (wantStatus && effect.element) return null;
+      if (!wantStatus && effect.status) return null;
+
+      var key = wantStatus ? effect.status : effect.element;
+      if (key && key !== id) return null;
+
       if (!self._matchCondition(monster, effect.condition)) return null;
       return effect.value;
     });
@@ -224,9 +293,23 @@
       text = stat + " ×" + effect.value;
     } else if (effect.type === "damageDealt" || effect.type === "damageTaken") {
       var element = (gameData.elements || {})[effect.element];
-      var name = element ? element.name : (party.allElements || "全");
-      var kind = (effect.type === "damageDealt") ? "の与ダメージ" : "の被ダメージ";
-      text = name + kind + " ×" + effect.value;
+      var kind = (effect.type === "damageDealt") ? "与ダメージ" : "被ダメージ";
+      // 属性を書いたものだけ「火の与ダメージ」。書いていなければ全部に効くので、属性は付けない
+      text = (element ? element.name + "の" : "") + kind + " ×" + effect.value;
+    } else if (effect.type === "resistBonus") {
+      // 属性の耐性（炎よけの札）と、状態異常の耐性（毒よけの護符）の両方。
+      // ここが無かったころは、工房や仲間画面の効果欄に**空の行**が出ていた
+      var target;
+      if (effect.status) {
+        var status = (gameData.statuses || {})[effect.status];
+        target = status ? status.name : effect.status;
+      } else if (effect.element) {
+        var el = (gameData.elements || {})[effect.element];
+        target = el ? el.name : effect.element;
+      } else {
+        target = party.allElements || "全";
+      }
+      text = target + "への耐性 " + (effect.value >= 0 ? "+" : "") + effect.value;
     }
 
     if (text && effect.condition) text += describeCondition(effect.condition);

@@ -30,7 +30,7 @@
  *   あとから増やす店は、品揃えを固定にしてもよい（品に unlockedBy を書かないだけ）。
  *
  * ▼ 店で買えないもの
- *   苔の護符は工房でしか作れない（data/recipes.js）。
+ *   苔の外套は工房でしか作れない（data/recipes.js）。
  *   「素材を集めて作る」ことに意味を持たせたいものは、ここに並べない。
  *
  * ▼ 並ぶ順番
@@ -55,7 +55,7 @@
         keeper: "keeperGeneral",
         keeperMotion: "breathe",
         unlockedBy: null,
-        // 進むほど品が増える店。苔の護符だけは工房でしか手に入らない
+        // 進むほど品が増える店。苔の外套だけは工房でしか手に入らない
         stock: [
           { item: "herb" },
           { item: "potion" },
@@ -69,22 +69,27 @@
           // 工房で使う素材。坑道をクリアすると取り扱いが始まる
           { item: "oreShard", unlockedBy: "mossyMine" },
           { item: "glowDust", unlockedBy: "mossyMine" },
-          // 深淵の雫（HP全回復・300G）はまだ並べない。
-          //   { item: "elixir", unlockedBy: "scorchingFissure" },
-          // どこで手に入れさせるかを決めてから戻す
-
           // 亀裂の素材。クリアしてから取り扱いが始まる。
           // 灼熱の牙（主のドロップ）は並べない —— 主を倒すこと自体に意味を残すため
           { item: "emberAsh", unlockedBy: "scorchingFissure" },
           { item: "ashFeather", unlockedBy: "scorchingFissure" },
           { item: "scorchedShell", unlockedBy: "scorchingFissure" },
 
+          // 毒を治す薬。深層をクリアすると取り扱いが始まる。
+          //   毒が出てくるのはステージ4からなので、それまで並べても使い道が無い
+          { item: "antidote", unlockedBy: "silentDepths" },
+
           // 深層の素材。クリアしてから取り扱いが始まる。
-          // 竜の鱗（ヨミリュウのドロップ）は並べない —— 竜を狩ること自体に意味を残すため
+          // 黄泉竜の鱗（ヨミリュウのドロップ）は並べない —— 竜を狩ること自体に意味を残すため
           { item: "slimeShard", unlockedBy: "silentDepths" },
           { item: "duskDew", unlockedBy: "silentDepths" },
           { item: "twistedVine", unlockedBy: "silentDepths" },
-          { item: "stormWing", unlockedBy: "silentDepths" }
+          { item: "stormWing", unlockedBy: "silentDepths" },
+
+          // 大きく回復する薬。毒沼をクリアしてから並ぶ。
+          //   毒沼までは回復薬（50G / 50回復）で足りる。
+          //   ここで初めて「1ターンで100戻す」選択肢を出す
+          { item: "elixir", unlockedBy: "venomMarsh" }
         ]
       },
 

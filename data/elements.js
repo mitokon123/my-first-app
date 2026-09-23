@@ -5,6 +5,7 @@
  * id / name / color : 識別子・表示名・図鑑などで使う色
  * order             : 並び順。図鑑の「技」を属性ごとに区切るときの順番に使う
  * physical          : true なら耐性計算の対象外（無属性）
+ * icon              : 16×16 の絵（data/sprites_icons.js）。仲間画面の耐性の表などで名前の隣に出す
  *
  * ▼ 属性ダメージの倍率（data/battle.js の resistance で調整）
  *   耐性が0以上   … 倍率 = 1 - 耐性 × resistStep（現在 0.10。+10 で無効）
@@ -31,17 +32,17 @@
     none:    { id: "none",    name: "無",   color: "#9aa4c0", order: 0, physical: true },
 
     // 標準的な攻め手。灼熱の亀裂の主属性で、そこでは通りにくくなる
-    fire:    { id: "fire",    name: "火",   color: "#e8542a", order: 1 },
+    fire:    { id: "fire",    name: "火",   color: "#e8542a", order: 1, icon: "iconElemFire" },
 
     // 火と岩に強い。スライム系が得意とする
-    water:   { id: "water",   name: "水",   color: "#4fb0d1", order: 2 },
+    water:   { id: "water",   name: "水",   color: "#4fb0d1", order: 2, icon: "iconElemWater" },
 
     // 今後のステージで使い手と弱点を順次増やしていく。現在は出番が少ない
-    wind:    { id: "wind",    name: "風",   color: "#7fd9a8", order: 3 },
+    wind:    { id: "wind",    name: "風",   color: "#7fd9a8", order: 3, icon: "iconElemWind" },
 
     // 苔むす坑道では通りにくい（地の中の魔物が多いため、耐性持ちが5体・弱点0体）。
     // 弱点は次のステージのモンスターで作る予定
-    earth:   { id: "earth",   name: "地",   color: "#c8a35e", order: 4 },
+    earth:   { id: "earth",   name: "地",   color: "#c8a35e", order: 4, icon: "iconElemEarth" },
 
     /**
      * 雷 … 特別な属性。
@@ -57,12 +58,12 @@
      *   入手の難しさだけで縛ると、運が悪いと一生触れないので、
      *   使い手は絞りつつ（1〜2種）、コストはPPで表現する。
      */
-    thunder: { id: "thunder", name: "雷",   color: "#ffd75e", order: 5 },
+    thunder: { id: "thunder", name: "雷",   color: "#ffd75e", order: 5, icon: "iconElemThunder" },
 
     // 闇と対をなす。坑道ではヒカリムシだけが強く耐える（光+7）
-    light:   { id: "light",   name: "光",   color: "#f2f0d8", order: 6 },
+    light:   { id: "light",   name: "光",   color: "#f2f0d8", order: 6, icon: "iconElemLight" },
 
     // 光と対をなす。夜行性・菌系が得意とする
-    dark:    { id: "dark",    name: "闇",   color: "#8b6fd6", order: 7 }
+    dark:    { id: "dark",    name: "闇",   color: "#8b6fd6", order: 7, icon: "iconElemDark" }
   };
 })(window.MyGame);

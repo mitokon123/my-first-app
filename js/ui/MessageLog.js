@@ -27,11 +27,6 @@
     if (line) this.queue.push(line);
   };
 
-  /** 複数行をまとめて追加する */
-  MessageLog.prototype.pushAll = function (lines) {
-    for (var i = 0; i < (lines || []).length; i++) this.push(lines[i]);
-  };
-
   /** 表示待ちのメッセージが残っているか */
   MessageLog.prototype.isWaiting = function () {
     return this.queue.length > 0 || this.current.length > 0;

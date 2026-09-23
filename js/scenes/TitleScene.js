@@ -1,10 +1,20 @@
 /**
  * TitleScene.js
- * タイトル画面。ゲーム名・世界名の表示と、「はじめから」「つづきから」の選択。
+ * タイトル画面。ゲーム名・世界名の表示と、「新しく始める」「続きから」の選択。
  *
  * 演出は「深淵（Abyss）へ落ちていく」イメージ。
  *   背景のたてグラデーション → 奥へ続く同心円 → ゆっくり降る粒子 → 文字
  * の順に重ねて描いている。
+ *
+ * ▼ この画面は「どのファイルで遊ぶか」を決めない
+ *   どちらを選んでも SaveSlotScene へ渡す。
+ *   セーブファイルが3つあるので、始めるにも続けるにも
+ *   「どのファイルか」を必ず通ることになる。
+ *
+ * ▼ パッチノートはメニューに置かない
+ *   遊ぶための入口（始める・続ける）と、読み物は性質が違う。
+ *   バージョン表記の隣に書のアイコンを置き、そこから開く。
+ *   押せることが分かるよう、カーソルを乗せると明るくなる。
  *
  * 配置・配色は data/ui.js の title、文言は data/messages.js の title で管理する。
  * ゲーム名と世界名は data/config.js から取得する。
@@ -24,11 +34,12 @@
     this.texts = (game.data.messages || {}).title || {};
 
     this.panel = new NS.Panel(game.ctx, this.theme);
-    this.menu = new NS.CommandMenu(this.panel, this.layout.menu);
-    this.confirmMenu = new NS.CommandMenu(this.panel, (this.layout.confirm || {}).menu);
+    this.sprites = new NS.SpriteRenderer(game.ctx, game.assets);
+    // 絵の描き手を渡すと、項目の左にアイコンが付く
+    this.menu = new NS.CommandMenu(this.panel, this.layout.menu, this.sprites);
 
-    // "menu" … 通常のメニュー / "confirm" … 新しく始める前の確認
-    this.phase = "menu";
+    // バージョン表記の隣の、パッチノートを開くボタン
+    this._patchHovered = false;
 
     // 粒子は奥・中・手前の3層。奥ほど遅く薄いので、重ねると奥行きが出る。
     // 層の設定が無い場合は、これまでどおり1層だけで動く
@@ -47,22 +58,26 @@
     this._buildMenu();
   }
 
+  /**
+   * メニューは「新しく始める」「続きから」。
+   * 探索を中断したファイルがあるときだけ「中断したところから」が先頭に足される。
+   * どれを選んでもセーブファイルの選択へ進むので、
+   * ここで確認（はい／いいえ）は挟まない。上書きの確認はその先で行う。
+   */
   TitleScene.prototype._buildMenu = function () {
-    this.menu.setItems([
-      { label: this.texts.newGame   || "new",      value: "new" },
-      { label: this.texts.continue  || "continue", value: "continue" },
-      { label: this.texts.patchNote || "patch",    value: "patchNote" }
-    ]);
-
-    // 誤って消してしまわないよう「いいえ」を先に置く
-    this.confirmMenu.setItems([
-      { label: this.texts.no  || "no",  value: "no" },
-      { label: this.texts.yes || "yes", value: "yes" }
-    ]);
+    var items = [];
+    if (this.saveManager.hasAnySuspend()) {
+      items.push({ label: this.texts.resume || "resume", value: "resume", icon: "iconContinue" });
+    }
+    items.push({ label: this.texts.newGame  || "new",      value: "new",      icon: "iconNewGame" });
+    items.push({ label: this.texts.continue || "continue", value: "continue", icon: "iconContinue" });
+    this.menu.setItems(items);
   };
 
   TitleScene.prototype.enter = function () {
-    this.phase = "menu";
+    this.game.audio.playBgm("title");
+    // 中断の有無は探索から戻るたびに変わるので、開くたびに組み直す
+    this._buildMenu();
 
     if (this._introPlayed) return;
     this._introPlayed = true;
@@ -89,85 +104,58 @@
 
     this.notice.update(dt);
 
-    if (this.phase === "confirm") this._updateConfirm();
-    else this._updateMenu();
+    this._updatePatchButton();
+    this._updateMenu();
   };
 
   TitleScene.prototype._updateMenu = function () {
     var result = this.menu.handleInput(this.game.input);
     if (!result || result.type !== "confirm") return;
 
-    if (result.value === "new") this._requestNewGame();
-    else if (result.value === "continue") this._continueGame();
-    else if (result.value === "patchNote") {
+    if (result.value === "new") this._openSlots("new");
+    else if (result.value === "continue") this._openSlots("continue");
+    else if (result.value === "resume") this._openSlots("resume");
+  };
+
+  /**
+   * セーブファイルの選択へ進む。
+   *
+   * 「続きから」でどのファイルも空のときだけ、ここで止めて知らせる。
+   * 空の一覧を見せても、選べるものが1つも無いので戻るしかない。
+   */
+  TitleScene.prototype._openSlots = function (mode) {
+    if (mode === "continue" && !this.saveManager.hasAnySave()) {
+      var saveTexts = (this.game.data.messages || {}).save || {};
+      this._showNotice(saveTexts.empty || this.texts.noSaveAny || "");
+      this.game.playError();
+      return;
+    }
+    this.game.scenes.change(new NS.SaveSlotScene(this.game, this, mode));
+  };
+
+  // --- パッチノートを開くボタン（バージョン表記の隣） ---
+
+  /** ボタンの当たり判定。バージョン表記の左に置く */
+  TitleScene.prototype._patchRect = function () {
+    var p = this.layout.patchButton;
+    if (!p) return null;
+    return { x: p.x, y: p.y, w: p.size, h: p.size };
+  };
+
+  TitleScene.prototype._updatePatchButton = function () {
+    var rect = this._patchRect();
+    var input = this.game.input;
+    this._patchHovered = false;
+    if (!rect || !input.getPointer) return;
+
+    var pointer = input.getPointer();
+    if (!pointer.inside) return;
+    if (!NS.Panel.containsPoint(rect, pointer)) return;
+
+    this._patchHovered = true;
+    if (pointer.clicked) {
       this.game.scenes.change(new NS.PatchNoteScene(this.game, this));
     }
-  };
-
-  /**
-   * 「新しく始める」を選んだとき。
-   * セーブデータがある場合は、いきなり始めずに確認を挟む。
-   */
-  TitleScene.prototype._requestNewGame = function () {
-    if (!this.saveManager.hasSave()) {
-      this._startNewGame();
-      return;
-    }
-    this.confirmMenu.index = 0;   // 既定は「いいえ」
-    this.phase = "confirm";
-  };
-
-  TitleScene.prototype._updateConfirm = function () {
-    var result = this.confirmMenu.handleInput(this.game.input);
-    if (!result) return;
-
-    if (result.type === "cancel" || result.value === "no") {
-      this.phase = "menu";
-      return;
-    }
-    if (result.value === "yes") this._startNewGame();
-  };
-
-  /** 新しく始める（進行データを消してから拠点へ） */
-  TitleScene.prototype._startNewGame = function () {
-    this.game.party = null;
-    this.game.storage = null;
-    this.game.inventory = null;
-    this.game.gold = null;
-    this.game.discovery = null;
-    this.game.clearedDungeons = null;
-    this.game.boughtBlessings = null;
-    this.game.offBlessings = null;
-    this.game.run = null;
-    this.phase = "menu";
-    this.game.scenes.change(new NS.HomeScene(this.game));
-  };
-
-  /**
-   * セーブデータから再開する。
-   * 読み込んだ進行データを引き継いだうえで、拠点から再開する。
-   */
-  TitleScene.prototype._continueGame = function () {
-    var result = this.saveManager.load();
-    var saveTexts = (this.game.data.messages || {}).save || {};
-
-    if (!result.success) {
-      this._showNotice(saveTexts[result.reason] || result.reason);
-      return;
-    }
-
-    var state = result.state;
-    this.game.party = state.party;
-    this.game.storage = state.storage;
-    this.game.inventory = state.inventory;
-    this.game.gold = state.gold || 0;
-    this.game.discovery = state.discovery;
-    this.game.clearedDungeons = state.clearedDungeons || {};
-    this.game.boughtBlessings = state.boughtBlessings || {};
-    this.game.offBlessings = state.offBlessings || {};
-    this.game.run = null;
-
-    this.game.scenes.change(new NS.HomeScene(this.game));
   };
 
   TitleScene.prototype._showNotice = function (text) {
@@ -189,9 +177,7 @@
 
     this._renderVignette(ctx, w, h);
     this._renderLogo(ctx);
-
-    if (this.phase === "confirm") this._renderConfirm(ctx);
-    else this.menu.render(this.game.clock);
+    this.menu.render(this.game.clock);
 
     this._renderNotice(ctx);
     this._renderFooter(ctx, w, h);
@@ -231,33 +217,6 @@
     ctx.fillStyle = this.layout.gradientBottom || "#000000";
     ctx.fillRect(0, 0, w, h);
     ctx.restore();
-  };
-
-  /** 「新しく始める」の確認ウィンドウ */
-  TitleScene.prototype._renderConfirm = function (ctx) {
-    var C = this.layout.confirm;
-    if (!C) return;
-
-    var t = this.theme;
-    this.panel.drawBox(C.box);
-
-    ctx.save();
-    ctx.textAlign = "center";
-
-    ctx.font = t.font || "14px monospace";
-    ctx.fillStyle = t.cursorColor || "#ffd75e";
-    ctx.fillText(this.texts.confirmNewTitle || "", C.title.x, C.title.y);
-
-    ctx.fillStyle = t.textColor || "#e8eaf0";
-    ctx.fillText(this.texts.confirmNewBody || "", C.body.x, C.body.y);
-
-    ctx.font = t.smallFont || "12px monospace";
-    ctx.fillStyle = t.hintColor || "#5b6688";
-    ctx.fillText(this.texts.confirmNewNote || "", C.note.x, C.note.y);
-
-    ctx.restore();
-
-    this.confirmMenu.render(this.game.clock);
   };
 
   /** 背景のたてグラデーション */
@@ -374,7 +333,7 @@
     ctx.restore();
   };
 
-  /** 操作説明とバージョン */
+  /** 操作説明とバージョン、そしてパッチノートのアイコン */
   TitleScene.prototype._renderFooter = function (ctx, w, h) {
     var L = this.layout;
     var config = this.game.data.config || {};
@@ -385,13 +344,77 @@
 
     var hint = L.hint || { x: w / 2, y: h - 28 };
     ctx.textAlign = "center";
-    ctx.fillText(
-      (this.phase === "confirm") ? (this.texts.confirmHint || "") : (this.texts.hint || ""),
-      hint.x, hint.y);
+    ctx.fillText(this.texts.hint || "", hint.x, hint.y);
 
     var version = L.version || { x: w - 8, y: h - 8 };
     ctx.textAlign = "right";
+    // カーソルが乗っているあいだは、バージョンも一緒に明るくする。
+    // アイコンだけ光っても「どこが押せるのか」が伝わりにくいため
+    ctx.fillStyle = this._patchHovered
+      ? (this.theme.cursorColor || "#ffd75e")
+      : (this.theme.hintColor || "#5b6688");
     ctx.fillText("v" + (config.version || "?"), version.x, version.y);
+    ctx.restore();
+
+    this._renderCredits(ctx);
+    this._renderPatchButton(ctx);
+  };
+
+  /**
+   * 左下の素材クレジット。data/audio.js の credits をそのまま並べる。
+   *
+   * ★ 表記が条件の素材を使うときは、ここに出ることが大事。
+   *   1件目をいちばん下に置き、増えたぶんは上へ積む
+   *   （下端の位置を固定しておけば、件数が変わっても隅から動かない）。
+   */
+  TitleScene.prototype._renderCredits = function (ctx) {
+    var L = this.layout.credit;
+    var credits = (this.game.data.audio || {}).credits || [];
+    if (!L || credits.length === 0) return;
+
+    var template = this.texts.credit || "{label}：{name} {url}";
+    var lineHeight = L.lineHeight || 16;
+
+    ctx.save();
+    ctx.font = this.theme.smallFont || "12px monospace";
+    ctx.fillStyle = this.theme.hintColor || "#5b6688";
+    ctx.textAlign = "left";
+    for (var i = 0; i < credits.length; i++) {
+      var c = credits[i];
+      var line = template
+        .replace("{label}", c.label || "")
+        .replace("{name}", c.name || "")
+        .replace("{url}", c.url || "");
+      ctx.fillText(line.trim(), L.x, L.y - lineHeight * i);
+    }
+    ctx.restore();
+  };
+
+  /**
+   * バージョン表記の隣に置く「書」のアイコン。押すとパッチノートが開く。
+   *
+   * ふだんは薄く、カーソルを乗せるとはっきり出す。
+   * 常に濃いと、隅の飾りなのか押せるものなのか分からない。
+   */
+  TitleScene.prototype._renderPatchButton = function (ctx) {
+    var p = this.layout.patchButton;
+    if (!p || !this.game.assets) return;
+
+    ctx.save();
+    ctx.globalAlpha = this._patchHovered
+      ? (p.activeAlpha === undefined ? 1 : p.activeAlpha)
+      : (p.idleAlpha === undefined ? 0.55 : p.idleAlpha);
+    this.sprites.draw(p.icon || "iconPatchNote", p.x, p.y, p.size, p.size);
+    ctx.restore();
+
+    // 何のアイコンかは、乗せたときだけ文字で出す
+    if (!this._patchHovered || !p.label) return;
+
+    ctx.save();
+    ctx.font = this.theme.smallFont || "12px monospace";
+    ctx.fillStyle = this.theme.cursorColor || "#ffd75e";
+    ctx.textAlign = "right";
+    ctx.fillText(this.texts.patchNote || "", p.label.x, p.label.y);
     ctx.restore();
   };
 

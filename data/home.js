@@ -28,6 +28,8 @@
       { key: "blessing", value: "blessing", icon: "iconBlessing", unlockedBy: "silentDepths" },
       { key: "items",    value: "items",    icon: "iconItems" },
       { key: "dex",      value: "dex",      icon: "iconDex" },
+      // よくある質問。困るのは遊んでいる最中なので、最初から開いている
+      { key: "help",     value: "help",     icon: "iconHelp" },
       { key: "save",     value: "save",     icon: "iconSave" },
       { key: "settings", value: "settings", icon: "iconSettings" }
     ]
