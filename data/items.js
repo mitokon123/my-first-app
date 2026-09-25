@@ -70,7 +70,7 @@
       id: "elixir",
       name: "深淵の雫",
       category: "heal",
-      description: "深き穴の底で採れる雫。HPを大きく回復する。",
+      description: "深淵の底で採れる雫。HPを大きく回復する。",
       maxStack: 9,
       price: 250,
       effect: { type: "healHp", value: 100 },
@@ -132,15 +132,15 @@
     /**
      * --- 武器 ---
      * 攻める力の中心。攻撃の加算はここに集め、アクセサリーの加算は小さめにしてある。
-     *   魔物の牙(+2) → 燃え殻の剣(+4・火) → 灼牙の戦刃(+10) → 深淵の牙(+7・速×1.1) → 沼骨の槍(+7・闇)
+     *   獣の牙(+2) → 燃え殻の剣(+4・火) → 灼牙の戦刃(+10) → 深淵の牙(+7・速×1.1) → 沼骨の槍(+7・闇)
      */
 
     // 最初から買える武器。ショップに並ぶ
     fangCharm: {
       id: "fangCharm",
-      name: "魔物の牙",
+      name: "獣の牙",
       category: "equipment",
-      description: "魔物の牙を握りに据えた小さな刃。攻める力がわずかに増す。",
+      description: "獣の牙を握りに据えた小さな刃。攻める力がわずかに増す。",
       maxStack: 9,
       price: 70,
       effect: null,
@@ -177,7 +177,7 @@
       id: "blazeCharm",
       name: "灼牙の戦刃",
       category: "equipment",
-      description: "獣の牙を研ぎ上げた刃。持つ者の攻める力を大きく引き上げる。",
+      description: "灼熱の獣の牙を研ぎ上げた刃。持つ者の攻める力を大きく引き上げる。",
       maxStack: 9,
       price: 300,
       effect: null,
@@ -404,7 +404,7 @@
       }
     },
 
-    // 深淵の王を倒さないと作れない。
+    // 深層の主を倒さないと作れない。
     // 苔の外套＝守り、灼牙の戦刃＝攻め、に対して「どちらも少しずつ」の形にしてある
     crownCircle: {
       id: "crownCircle",
@@ -692,7 +692,7 @@
       id: "crownShard",
       name: "王冠のかけら",
       category: "material",
-      description: "深淵の王がかぶっていた冠のかけら。芯に澄んだ水を宿している。",
+      description: "深層の主がかぶっていた冠のかけら。芯に澄んだ水を宿している。",
       maxStack: 99,
       price: 260,
       effect: null,

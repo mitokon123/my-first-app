@@ -169,7 +169,7 @@
       unlockedBy: "scorchingFissure"
     },
 
-    // 深淵の王の落とすものを使う。ステージ3を締めくくる装備
+    // 深層の主の落とすものを使う。ステージ3を締めくくる装備
     crownCircle: {
       id: "crownCircle",
       order: 13,

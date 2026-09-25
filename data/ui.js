@@ -341,7 +341,7 @@
       },
 
       // 背景の景色。パネルの下に敷くので、上下の余白にだけ見える
-      //   hole     … 画面の下にある「深き穴」。ここが拠点の名前の由来
+      //   hole     … 画面の下にある穴（揺籃の穴）。拠点はそのそばにある
       //   ground   … 穴のふちの地面
       //   campfire … たき火。data/motions.js の blaze で揺らす
       //              glow は火のまわりの明かり。glowPulse でゆっくり強弱がつく
@@ -390,12 +390,113 @@
     },
 
     /**
+     * 物語の場面（js/scenes/StoryScene.js）。中身は data/story.js。
+     *
+     *   charsPerSecond … 1秒に出す文字数（決定で途中を飛ばせる）
+     *   pageFade       … ページが浮かび上がる時間（ms）。文字はそのあとから出る
+     *   skipWindow     … Esc を1回押してから、もう1回で飛ばせる時間（ms）
+     *   narration      … 語り。centerY を中心に行の塊を縦に並べる
+     *   dialogue       … 会話。box が下の窓、nameTag が名前の札（窓の上の縁に乗る）
+     *   more           … 出きったページに出す「次へ」の印。blink は点滅の周期（ms）
+     *   draftBadge     … 仮の文章（draft: true）の印の位置。右寄せ
+     *   hint           … 右下の操作案内。warnColor は「もう一度で飛ばす」のときの色
+     *
+     *   ▼ 演出
+     *   title          … 見出しのページ（style: "title"）。字間 spacingFrom から spacing へ詰めながら浮かぶ
+     *   bgFade         … 背景が切り替わるとき、溶かして重ねる時間（ms）
+     *   actorEnter     … 立ち絵が登場の動きをする時間（ms）。actorDistance はその移動量（px）
+     *   letterbox      … 上下の黒い帯（場面に letterbox: true と書いたときだけ）
+     *   vignette       … 四隅を暗くする濃さ
+     *   fx             … 揺れ（shake）と光（flash）の既定。設定「エフェクトの濃さ」で掛けられる
+     *   backdrops      … 背景の一覧。data/story.js の bg でこの id を書く。
+     *                    kind ごとの描き方は js/ui/StoryBackdrop.js の冒頭を参照
+     *     粒子（particles / stars）: count 数 / color / minSize・maxSize / speed 速さ / alpha 濃さ /
+     *                                top・bottom 縦の範囲 / left・right 横の範囲
+     */
+    story: {
+      background: "#05070d",
+      charsPerSecond: 40,
+      pageFade: 400,
+      skipWindow: 2000,
+      bgFade: 700,
+      blackFade: 900,     // 暗転（transition: "black"）が明けるまでの時間
+      actorEnter: 700,
+      actorExit: 500,     // いなくなった立ち絵が薄れて消えるまでの時間
+      actorDistance: 60,
+      letterbox: { height: 48, time: 800, color: "#000000" },
+      vignette: { alpha: 0.55 },
+      fx: {
+        shake: { power: 7, time: 500 },
+        flash: { color: "#ffffff", alpha: 0.85, time: 450 },
+        // 別の背景を一瞬だけ重ねる（記憶がよぎる）。bg は重ねる背景
+        memory: { bg: "burning", alpha: 0.55, time: 1400 }
+      },
+      title: { font: "30px monospace", color: "#e6ecff", glow: "rgba(120,160,255,0.6)",
+               centerY: 270, lineHeight: 52, spacing: 6, spacingFrom: 30,
+               lineWidth: 220, ruleColor: "#4a6ba8", duration: 1600 },
+      narration: { centerY: 280, lineHeight: 36, font: "20px monospace", color: "#e6ecff", moreGap: 40,
+                   shadowColor: "rgba(0,0,0,0.9)", shadowBlur: 8 },
+      // 選択肢の枠。会話の窓（dialogue.box）の右上、拠点の夜で立つ人物の頭より上に置く。
+      // bottom は枠の下端の y（人物の頭はおよそ y 350）
+      choice: { x: 590, w: 170, bottom: 336, itemHeight: 34, padY: 10, font: "18px monospace" },
+
+      backdrops: {
+        // 何も無い闇
+        void:    { kind: "void", color: "#05070d" },
+        // 深淵（タイトルと同じ、奥へ広がる円）
+        abyss:   { kind: "abyss", top: "#05070d", bottom: "#0d1830", centerY: 250,
+                   rings: 7, baseRadius: 30, ringGap: 46, ringSpeed: 0.012, squash: 0.42,
+                   ringColor: "#4a6ba8",
+                   particles: { count: 40, color: "#a8c0ff", minSize: 1, maxSize: 2.5, speed: 0.03, alpha: 0.6 } },
+        // 燃える村の夜（主人公の過去）
+        //   flames は家並みの向こうで揺れる炎（屋根の上に先だけ覗く）
+        burning: { kind: "embers", top: "#12040a", bottom: "#4a1206",
+                   glowColor: "#ff6a2a", glowRadius: 560, glowAlpha: 0.95, glowOffset: -20,
+                   flames: { count: 8, width: 70, height: 150, color: "#ff5a1a", tipColor: "#ffb04a", alpha: 0.85 },
+                   skyline: { y: 470, color: "#070204", minWidth: 40, maxWidth: 90,
+                              minHeight: 24, maxHeight: 70, gap: 10 },
+                   particles: { count: 90, color: "#ffcf7a", minSize: 2, maxSize: 4, speed: 0.06, alpha: 1 } },
+        // 拠点の夜。景色を上へずらして、下に会話の窓が出てもたき火が見えるようにしてある
+        camp:    { kind: "camp", shiftY: -130,
+                   stars: { count: 50, color: "#c8d4ff", top: 0, bottom: 300, minSize: 1, maxSize: 2, alpha: 0.6 },
+                   particles: { count: 16, color: "#ffb060", top: 250, bottom: 400, left: 650, right: 730,
+                                minSize: 1, maxSize: 2.5, speed: 0.03, alpha: 0.9 } },
+        // 星の夜空（試験を終えた夜）
+        night:   { kind: "stars", top: "#02030a", bottom: "#0e1630",
+                   stars: { count: 140, color: "#e6ecff", top: 0, bottom: 470, minSize: 1, maxSize: 2.2, alpha: 0.9 },
+                   shootingStar: { period: 5200, duration: 700, length: 120, color: "#e6ecff" },
+                   horizon: { y: 500, color: "#03040a" } },
+        // ダンジョンの中。色は data/dungeonThemes.js から引く
+        mine:    { kind: "cave", theme: "mine",
+                   particles: { count: 30, speed: 0.01, alpha: 0.4, minSize: 1, maxSize: 2 } },
+        ember:   { kind: "cave", theme: "ember",
+                   particles: { count: 45, color: "#ff9a50", speed: 0.02, alpha: 0.6, minSize: 1, maxSize: 2.5 } },
+        depths:  { kind: "cave", theme: "depths", depthAlpha: 0.7,
+                   particles: { count: 30, speed: 0.008, alpha: 0.35, minSize: 1, maxSize: 2 } },
+        venom:   { kind: "cave", theme: "venom",
+                   particles: { count: 35, color: "#9adf6a", speed: 0.01, alpha: 0.4, minSize: 1, maxSize: 2.5 } }
+      },
+      dialogue: {
+        box: { x: 40, y: 420, w: 720, h: 130 },
+        nameTag: { x: 60, y: 402, h: 30, padX: 14 },
+        nameFont: "16px monospace", nameColor: "#ffd75e",
+        font: "18px monospace", color: "#e6ecff",
+        padX: 28, padTop: 58, lineHeight: 30
+      },
+      more: { text: "▼", font: "14px monospace", color: "#7f8db8", blink: 900 },
+      draftBadge: { x: 780, y: 30, font: "13px monospace", color: "#c07a5a" },
+      hint: { x: 780, y: 585, font: "12px monospace", color: "#5b6688", warnColor: "#ffd75e" }
+    },
+
+    /**
      * 主人公の名前と服の色を決める画面（js/scenes/PlayerSetupScene.js）。
      *
      * 左に「選んでいる色で歩いている姿」、右に決める項目を縦に並べる。
      *   preview.x/y  … 絵の**中心**の座標
-     *   rows         … 名前・色の欄。h+gap ずつ下にずれる
+     *   rows         … 名前・色・性別・一人称の欄。h+gap ずつ下にずれる
      *   swatch       … 色見本1つぶんの大きさと間隔（6色ぶん横に並ぶ）
+     *   chip         … 性別・一人称の選択肢1つぶんの札。x は並びの左端（色見本と揃える）。
+     *                  縦は欄の中央に置く
      */
     playerSetup: {
       background: "#0a0f1c",
@@ -405,10 +506,11 @@
       preview: { boxX: 48, boxY: 122, boxW: 240, boxH: 300,
                  x: 168, y: 250, size: 176, labelY: 392 },
 
-      rows:   { x: 310, y: 130, w: 442, h: 66, gap: 14 },
+      rows:   { x: 310, y: 122, w: 442, h: 62, gap: 12 },
       // 色見本は「色」の欄（rows の2つ目）の中に置く
-      swatch: { x: 420, y: 226, size: 34, gap: 12 },
-      done:   { x: 310, y: 296, w: 442, h: 52 },
+      swatch: { x: 420, y: 210, size: 34, gap: 12 },
+      chip:   { x: 420, w: 48, h: 30, gap: 6, font: "13px monospace" },
+      done:   { x: 310, y: 426, w: 442, h: 52 },
 
       hint:   { x: 48, y: 570 }
     },
@@ -819,6 +921,14 @@
         //   font     … 効果の文（「素早さ ×1.1」）
         //   fromFont … どこから来ているか（「（深淵の牙）」）。小さくして主張させない
         effects: { gap: 12, lineHeight: 18, font: "13px monospace", fromFont: "11px monospace" }
+      },
+
+      // 愛情度の詳細。「様子を見る」の上に重ねる窓（js/scenes/PartyScene.js の _renderAffectionDetail）
+      //   colNeed / colReward … 段階の一覧の「必要な回数」「報酬」の列の位置（窓の左端から）
+      affectionDetail: {
+        box: { x: 150, y: 110, w: 500, h: 320 },
+        padX: 28, padTop: 40, titleGap: 34, sectionGap: 34, rowHeight: 28,
+        colNeed: 120, colReward: 190, barColor: "#ffb0c8"
       },
 
       hint: { x: 32, y: 576 }

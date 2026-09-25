@@ -60,6 +60,8 @@
       goldGained:   "{amount}G を手に入れた!",              // amount
       levelUp:      "{actor} はレベル {level} に上がった!", // actor, level
       skillLearned: "{actor} は {skill} を覚えた!",          // actor, skill
+      // 愛情度の段階が上がった（data/affection.js）。stage は段階の名前（慣れ・信頼・絆）
+      affectionUp:  "{actor} との関係が「{stage}」になった!",  // actor, stage
       fleeSuccess:  "うまく逃げ切れた!",
       fleeFailed:   "逃げられない!",
       win:          "戦いに勝った!",
@@ -159,7 +161,7 @@
     },
 
     title: {
-      subtitle: "モンスター育成 × ローグライク",
+      // 題字の下の副題。いまは出していない（書けば data/ui.js の title.subtitle の位置に出る）
       newGame:  "新しく始める",
       continue: "続きから",
       // 探索を中断したファイルがあるときだけ出る
@@ -195,12 +197,23 @@
     },
 
     /**
+     * 物語の場面（js/scenes/StoryScene.js）。
+     * draft は、文章がまだ仮の場面（data/story.js の draft: true）で右上に出る印。
+     */
+    story: {
+      hint:        "Enter・クリック: 次へ    Esc: 飛ばす",
+      choiceHint:  "↑↓: 選ぶ    Enter・クリック: 決める    Esc: 飛ばす",
+      skipConfirm: "もう一度 Esc で飛ばす",
+      draft:       "（仮の文章）"
+    },
+
+    /**
      * 拠点（ホーム）画面。
      * comingSoon は、まだ実装していない項目を選んだときの表示。
      */
     home: {
       title:      "拠点",
-      subtitle:   "深き穴のほとり",
+      // 拠点の名前はまだ決まっていない（ストーリー構成.md の 8）。決まったら subtitle に書く
       gold:       "所持金 {amount}G",                       // amount
       dungeon:    "ダンジョンへ潜る",
       party:      "仲間",
@@ -233,12 +246,14 @@
       nameAction: "決定で変える",
       nameTitle:  "あなたの名前を決める",
       colorLabel: "ふくの色",
+      genderLabel: "性別",
+      firstPersonLabel: "一人称",
 
       start: "この姿で始める",
       apply: "この内容にする",
 
-      hintNew:  "↑↓: 選択    ←→: 色を選ぶ    決定: 決定",
-      hintEdit: "↑↓: 選択    ←→: 色を選ぶ    決定: 決定    Esc: 戻る"
+      hintNew:  "↑↓: 選択    ←→: 色・性別・一人称を選ぶ    決定: 決定",
+      hintEdit: "↑↓: 選択    ←→: 色・性別・一人称を選ぶ    決定: 決定    Esc: 戻る"
     },
 
     /**
@@ -368,7 +383,6 @@
     /** ショップ */
     shop: {
       title:        "ショップ",
-      subtitle:     "深き穴のほとりの行商",
       tabBuy:       "買う",
       tabSell:      "売る",
       owned:        "所持 {count}",                         // count
@@ -568,6 +582,8 @@
       // 落とすもの。一度仲間にすると、その種族から取れるものが全て見える
       dropLabel:    "落とすもの",
       notCaught:    "（未加入）",
+      // 愛情度で書き足される記録の見出し。stage は段階の名前（慣れ・信頼・絆）
+      recordLabel:  "― {stage} ―",
       hint:          "↑↓: 選択    ←→: 切替    Esc: 戻る",
       hintScrollable:"↑↓: 選択    ←→: 切替    決定: 説明を読む    Esc: 戻る",
       hintDetail:    "↑↓: 説明をスクロール    決定/Esc: 一覧へ戻る"
@@ -678,10 +694,18 @@
       appear: "{name} が立ちふさがった!"                    // name
     },
 
+    /**
+     * 一度きりの出来事（data/dungeons.js の events）で、戦闘の始めに出す一言。
+     * キーは出来事の message に書いた名前。{name} は相手の名前
+     */
+    events: {
+      yomiryuAmbush: "暗がりから {name} が襲いかかってきた!"
+    },
+
     // エンディングは今は簡素な内容。ボスを増やしたら差し替える想定。
     ending: {
       title:    "クリア!",
-      body:     "深淵の王を倒した!",
+      body:     "深層の主を倒した!",
       thanks:   "遊んでくれてありがとう",
       hint:     "決定キーでタイトルへ"
     },
@@ -746,14 +770,37 @@
       hintReorder: "↑↓: 移動先を選ぶ    決定: そこへ入れ替え    Esc: やめる",
       hintStorageEmpty: "預けている仲間はいない    ←→: パーティへ",
       hintEquip:   "↑↓: 選択   決定: 着ける / 外す   Esc: 戻る",
-      hintInspect: "↑↓: 別の仲間を見る    決定/Esc: 一覧へ戻る",
+      hintInspect: "↑↓: 別の仲間を見る    決定・愛情度を押す: 愛情度の詳細    Esc: 一覧へ戻る",
       natureLabel: "性格",
       attackLabel: "攻撃",
       defenseLabel:"防御",
       speedLabel:  "素早さ",
       expLabel:    "次のLvまで",
       skillLabel:  "技",
-      abilityLabel:"特性"
+      abilityLabel:"特性",
+      // 愛情度（「様子を見る」の名前の下）。count は「いま/次の段階に要る数」
+      affectionLabel: "愛情度 {stage}（{count}）",   // stage, count
+      // 「効果」欄に出す愛情度の上がり。出どころの欄には段階の名前が出る
+      affectionEffect: "全能力 ×{value}",            // value
+
+      // --- 愛情度の詳細（「様子を見る」で愛情度の札を押す・決定で開く） ---
+      hintAffection:  "決定・Esc・クリック: 閉じる",
+      affectionTitle: "{name} との関係",               // name
+      affectionNow:   "いまの段階：{stage}（{count}回）", // stage, count
+      affectionNext:  "次の「{stage}」まで あと {n} 回",  // stage, n
+      affectionMax:   "いちばん深い段階に届いている",
+      affectionNeed:  "{n}回",                          // n
+      affectionStatReward:  "全能力 +{value}%",          // value
+      affectionStatTotal:   "（合わせて +{value}%）",     // value
+      affectionSkillReward: "「{skill}」を覚える",        // skill
+      // 絆の報酬を、届くまで伏せるときの表示（data/affection.js の hideBondRewardUntilReached）
+      affectionHidden:  "？？？",
+      // 絆に届いたが、その種族の報酬がまだ決まっていないとき
+      affectionNoReward: "―",
+      affectionNotes: [
+        "勝った戦闘で、場に出ていると深まる。控えでは深まらない。",
+        "深まるほど、図鑑にその種族の記録が書き足される。"
+      ]
     }
   };
 })(window.MyGame);

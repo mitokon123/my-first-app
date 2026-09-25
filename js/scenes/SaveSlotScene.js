@@ -405,8 +405,14 @@
     // 名前と色も前の周回のものを持ち越さない（この画面で決め直す）
     game.playerName = null;
     game.playerColor = null;
+    game.playerGender = null;
+    game.playerFirstPerson = null;
+    game.doneEvents = {};
     // 説明も最初から出す（前の周回で見た記録を持ち越さない）
     game.tutorial.loadSaveData(null, false);
+    game.story.loadSaveData(null, false);
+    // 設定も既定値から（別のファイルで「チュートリアルを出さない」にしていても、ここでは出す）
+    game.resetFileSettings();
 
     // 拠点へ行く前に、名前と服の色を決めてもらう
     game.scenes.change(new NS.PlayerSetupScene(game, this, "new"));
@@ -439,7 +445,9 @@
     // これ以降のセーブは、読み込んだのと同じファイルへ書く
     game.setSaveSlot(slot.slot);
     game.applyLoadedState(result.state);
-    game.scenes.change(new NS.HomeScene(game));
+    game.loadFileSettings();
+    // 見る前に閉じた物語（主を倒した直後にやめた など）があれば、ここで流す
+    game.playStory("homeReturn", new NS.HomeScene(game));
   };
 
   SaveSlotScene.prototype._showNotice = function (text) {

@@ -108,7 +108,8 @@
     if (this.homeButton.handleInput(input) ||
         input.isPressed("confirm") ||
         input.isPressed("cancel")) {
-      this.game.scenes.change(new NS.HomeScene(this.game));
+      // 拠点に着いたところで流れる物語（主を倒した後など）があれば、先に流す
+      this.game.playStory("homeReturn", new NS.HomeScene(this.game));
     }
   };
 

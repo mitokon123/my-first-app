@@ -2,11 +2,12 @@
  * Discovery.js
  * 図鑑の「発見記録」を管理する。
  *
- * 記録するのは4種類。
- *   monstersSeen   … 戦闘で出会ったモンスター
- *   monstersCaught … 捕まえたモンスター
- *   itemsObtained  … 手に入れたことのあるアイテム
- *   skillsLearned  … 仲間が実際に覚えた技
+ * 記録するのは5種類。
+ *   monstersSeen    … 戦闘で出会ったモンスター
+ *   monstersCaught  … 捕まえたモンスター
+ *   itemsObtained   … 手に入れたことのあるアイテム
+ *   skillsLearned   … 仲間が実際に覚えた技
+ *   affectionStages … 種族ごとの、いちばん深まった愛情度の段階（図鑑の記録を読める範囲）
  *
  * ▼ 技だけ「覚えた」を別に記録している理由
  *   技はレベルで覚えるので、種族を捕まえただけでは分からない。
@@ -28,7 +29,22 @@
     this.monstersCaught = {};
     this.itemsObtained = {};
     this.skillsLearned = {};
+    // 種族ごとに、いちばん深まった愛情度の段階（{ speciesId: 段階の番号 }）。
+    // 図鑑の記録（data/monsters.js の records）をどこまで読めるかに使う。
+    // その個体を預けても失っても、記録は残る（図鑑は「これまでに見たもの」の本なので）
+    this.affectionStages = {};
   }
+
+  /** その種族の愛情度の段階を残す。下がることはない（いちばん深いものだけ残す） */
+  Discovery.prototype.markAffectionStage = function (speciesId, stageIndex) {
+    if (!speciesId || typeof stageIndex !== "number") return;
+    if ((this.affectionStages[speciesId] || 0) < stageIndex) this.affectionStages[speciesId] = stageIndex;
+  };
+
+  /** その種族でいちばん深まった段階の番号（0 = 出会い） */
+  Discovery.prototype.getAffectionStage = function (speciesId) {
+    return this.affectionStages[speciesId] || 0;
+  };
 
   // --- 記録 ---
 
@@ -70,7 +86,8 @@
       monstersSeen: Object.keys(this.monstersSeen),
       monstersCaught: Object.keys(this.monstersCaught),
       itemsObtained: Object.keys(this.itemsObtained),
-      skillsLearned: Object.keys(this.skillsLearned)
+      skillsLearned: Object.keys(this.skillsLearned),
+      affectionStages: this.affectionStages
     };
   };
 
@@ -84,6 +101,11 @@
     // 古いセーブにはこの記録が無い。
     // Game._recordInitialDiscoveries が、いま連れている仲間の技を拾い直す
     fill(discovery.skillsLearned, saved.skillsLearned);
+    // 愛情度の段階。古いセーブには無いので空から（Game が連れている仲間から拾い直す）
+    var stages = saved.affectionStages || {};
+    for (var id in stages) {
+      if (typeof stages[id] === "number") discovery.affectionStages[id] = stages[id];
+    }
     return discovery;
   };
 

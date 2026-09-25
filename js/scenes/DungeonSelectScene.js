@@ -123,8 +123,15 @@
 
     this.panel.drawText(this.texts.title || "", title.x, title.y,
       { font: title.font, color: title.color });
-    this.panel.drawText(this.texts.subtitle || "", subtitle.x, subtitle.y,
+    this.panel.drawText(this._regionName() || this.texts.subtitle || "", subtitle.x, subtitle.y,
       { font: subtitle.font, color: subtitle.color });
+  };
+
+  /** 選んでいる場所がある地方（穴）の名前。data/regions.js。無ければ空 */
+  DungeonSelectScene.prototype._regionName = function () {
+    var dungeon = this.getSelected();
+    var region = dungeon ? (this.game.data.regions || {})[dungeon.region] : null;
+    return region ? (region.name || "") : "";
   };
 
   /**

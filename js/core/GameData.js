@@ -34,6 +34,8 @@
     this.patchnotes = raw.patchnotes || {}; // 更新履歴（タイトル画面で表示）
     this.help      = raw.help      || {}; // 遊び方（よくある質問と答え）
     this.tutorial  = raw.tutorial  || {}; // 初めての場面で出る説明
+    this.story     = raw.story     || {}; // 物語の場面
+    this.affection = raw.affection || {}; // 愛情度の段階と報酬
     this.audio     = raw.audio     || {}; // BGMと効果音の一覧
     this.home      = raw.home      || {}; // 拠点メニューの項目
     this.player    = raw.player    || {}; // プレイヤーの初期状態
@@ -48,6 +50,7 @@
     this.dungeonThemes = raw.dungeonThemes || {}; // ダンジョンごとの色と床の飾り
     this.features  = raw.features  || {}; // 仕掛けマス（宝箱・泉・罠）の定義
     this.dungeons  = raw.dungeons  || {}; // 挑めるダンジョンの一覧
+    this.regions   = raw.regions   || {}; // 地方（穴）の名前
     this.sprites   = raw.sprites   || {};
     this.motions   = raw.motions   || {}; // 絵の動かし方（浮く・呼吸する など）
     this.motionDefaults = raw.motionDefaults || {}; // 場面ごとの動きの既定（全種族共通）

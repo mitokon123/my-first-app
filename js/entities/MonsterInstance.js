@@ -38,6 +38,10 @@
 
     // 身につけている装備（data/items.js の id の配列）。枠は config.equipSlots
     this.equipment = options.equipment || [];
+
+    // 愛情度。勝った戦闘で場に出ていた回数の合計（data/affection.js）。
+    // 段階が上がると能力が少し上がり、絆で専用技を覚える。下がることはない
+    this.affection = 0;
     /**
      * 掛かっている状態異常（data/statuses.js）。
      *
@@ -801,6 +805,130 @@
     return result;
   };
 
+  // --- 愛情度（data/affection.js） ---
+
+  /** 段階の表（上から順） */
+  MonsterInstance.prototype._affectionStages = function () {
+    return ((this._data && this._data.affection) || {}).stages || [];
+  };
+
+  /** 愛情度から段階の番号を求める（0 = 出会い） */
+  MonsterInstance.prototype._stageIndexOf = function (value) {
+    var stages = this._affectionStages();
+    var index = 0;
+    for (var i = 0; i < stages.length; i++) {
+      if (value >= (stages[i].need || 0)) index = i;
+    }
+    return index;
+  };
+
+  /** いまの段階の番号（0 = 出会い） */
+  MonsterInstance.prototype.getAffectionStageIndex = function () {
+    return this._stageIndexOf(this.affection || 0);
+  };
+
+  /** いまの段階の定義（{ id, name, need, … }） */
+  MonsterInstance.prototype.getAffectionStage = function () {
+    return this._affectionStages()[this.getAffectionStageIndex()] || null;
+  };
+
+  /** 次の段階の定義（いちばん上なら null） */
+  MonsterInstance.prototype.getNextAffectionStage = function () {
+    return this._affectionStages()[this.getAffectionStageIndex() + 1] || null;
+  };
+
+  /** いまの段階までに上がった能力の割合の合計（0.06 = +6%） */
+  MonsterInstance.prototype.getAffectionBonus = function () {
+    var stages = this._affectionStages();
+    var upTo = this.getAffectionStageIndex();
+    var total = 0;
+    for (var i = 0; i <= upTo && i < stages.length; i++) total += stages[i].statBonus || 0;
+    return total;
+  };
+
+  /**
+   * 愛情度で上がっている能力。書き方は特性・装備と同じ effects なので、
+   * EffectSystem がここも読めば、ステータス計算は何も変えなくてよい。
+   *   ・慣れ・信頼の全能力の上がり（どの種族も同じ）
+   *   ・絆に届いていれば、その種族だけの報酬の effects（data/monsters.js の bondReward）
+   */
+  MonsterInstance.prototype.getAffectionEffects = function () {
+    var effects = [];
+    var bonus = this.getAffectionBonus();
+    if (bonus > 0) {
+      var stats = ((this._data && this._data.affection) || {}).stats || [];
+      for (var i = 0; i < stats.length; i++) {
+        effects.push({ type: "statMultiplier", stat: stats[i], value: 1 + bonus });
+      }
+    }
+    if (this.hasReachedBondReward()) {
+      var reward = this.getBondReward();
+      if (reward && reward.effects) effects = effects.concat(reward.effects);
+    }
+    return effects;
+  };
+
+  /**
+   * その種族だけの報酬（data/monsters.js の bondReward）。決まっていなければ null。
+   * 古い書き方（bondSkill: "技のid"）も読める
+   */
+  MonsterInstance.prototype.getBondReward = function () {
+    var sp = this._species;
+    if (!sp) return null;
+    if (sp.bondReward) return sp.bondReward;
+    if (sp.bondSkill) return { skill: sp.bondSkill };
+    return null;
+  };
+
+  /** 種族ごとの報酬を受け取る段階（bondReward: true）に届いているか */
+  MonsterInstance.prototype.hasReachedBondReward = function () {
+    var stages = this._affectionStages();
+    var upTo = this.getAffectionStageIndex();
+    for (var i = 0; i <= upTo && i < stages.length; i++) {
+      if (stages[i].bondReward) return true;
+    }
+    return false;
+  };
+
+  /**
+   * 愛情度を足す。段階が上がったら、その段階の専用技も覚える。
+   * @returns {{from:number, to:number, learned:string[]}} 段階の番号（上がっていなければ from === to）
+   */
+  MonsterInstance.prototype.gainAffection = function (amount) {
+    var from = this.getAffectionStageIndex();
+    var maxHpBefore = this.getMaxHp();
+    var maxPpBefore = this.getMaxPp();
+
+    this.affection = (this.affection || 0) + (amount || 0);
+    var to = this.getAffectionStageIndex();
+    var learned = [];
+
+    if (to > from) {
+      // 最大値が上がったぶんだけ、いまの値も上げる（上がった瞬間に減って見えないように）
+      this.currentHp = Math.min(this.getMaxHp(), this.currentHp + Math.max(0, this.getMaxHp() - maxHpBefore));
+      this.currentPp = Math.min(this.getMaxPp(), this.currentPp + Math.max(0, this.getMaxPp() - maxPpBefore));
+      learned = this._learnBondSkill();
+    }
+    return { from: from, to: to, learned: learned };
+  };
+
+  /**
+   * 報酬を受け取る段階に届いていれば、その種族の報酬の技（bondReward.skill）を覚える。
+   * 技を書いていない種族（能力・耐性だけの報酬、まだ決まっていない）では何もしない。
+   * 能力・耐性のほうは getAffectionEffects が掛けるので、ここでは扱わない。
+   * @returns {string[]} 新しく覚えた技
+   */
+  MonsterInstance.prototype._learnBondSkill = function () {
+    var reward = this.getBondReward();
+    var skillId = reward && reward.skill;
+    if (!skillId || !this._data.getSkill(skillId)) return [];
+    if (this.skills.indexOf(skillId) >= 0) return [];
+    if (!this.hasReachedBondReward()) return [];
+
+    this.skills.push(skillId);
+    return [skillId];
+  };
+
   // --- セーブ・ロード ---
 
   /**
@@ -821,6 +949,7 @@
              defense: this.ivs.defense, speed: this.ivs.speed || 0 },
       skills: this.skills.slice(),
       equipment: (this.equipment || []).slice(),
+      affection: this.affection || 0,
       // 状態異常。ふつうは拠点へ帰った時点で空になるが、
       // 毒（persists）はダンジョンの途中でセーブすると残ったままになる。
       // これを保存しないと、セーブして再開するだけで毒が消せてしまう
@@ -874,6 +1003,11 @@
     // 名前は setNickname を通す（古いセーブや、長さの決まりが変わった場合にそろえる）
     instance.setNickname(saved.nickname);
     instance.exp = saved.exp || 0;
+    // 愛情度。古いセーブには無いので 0 から。
+    // HP・PP を戻すより先に入れる（最大値が愛情度で上がっているため）
+    instance.affection = saved.affection || 0;
+    // 絆の報酬の技があとから決まった場合も、もう絆に届いている仲間には覚えさせる
+    instance._learnBondSkill();
     // 最大値を超えないように補正してから戻す
     instance.currentHp = Math.max(0, Math.min(instance.getMaxHp(), saved.currentHp));
     // 古いセーブには PP が無いので、その場合は満タンにする

@@ -6,6 +6,17 @@
  * このクラスは「今の値」を管理するだけで、項目が増えても変更不要。
  *
  * 保存に失敗しても例外は投げず、結果を返すだけにしている（セーブと同じ方針）。
+ *
+ * ▼ 設定はセーブファイルごと
+ *   保存先は2つある。
+ *     fileKey   … いま遊んでいるファイルの設定（SaveManager.settingsKeyFor が決める）
+ *     sharedKey … 最後に保存した設定の写し（data/settings.js の storageKey）
+ *   ファイルを選ぶまで（タイトル）は sharedKey を使う。
+ *   ファイルを選んだら、そのファイルの設定に切り替える（Game.loadFileSettings）。
+ *   保存するときは両方へ書くので、タイトルでは「最後に遊んだファイルの音量」になる。
+ *
+ *   ★ sharedKey は、ファイルごとに分ける前の保存先そのもの。
+ *     分ける前から遊んでいたファイルは、起動時にここから写してもらう（Game._migrateSettings）
  */
 (function (NS) {
   "use strict";
@@ -16,12 +27,49 @@
   function SettingsManager(gameData) {
     var config = gameData.settings || {};
     this.items = config.items || [];
-    this.storageKey = config.storageKey || "game.settings";
+    this.sharedKey = config.storageKey || "game.settings";
+    this.fileKey = null;   // ファイルを選ぶまでは無い
 
     this.values = {};
     this.resetToDefaults();
     this.load();
   }
+
+  // --- どの保存先を使うか ---
+
+  /** タイトルに戻ったとき。最後に保存した設定を読む */
+  SettingsManager.prototype.useShared = function () {
+    this.fileKey = null;
+    this.resetToDefaults();
+    return this._loadFrom(this.sharedKey);
+  };
+
+  /**
+   * そのファイルの設定を読む（続きから・中断から）。
+   * ファイルに設定が無ければ、最後に保存した設定を使う。
+   * @returns {boolean} そのファイルの設定を読めたか
+   */
+  SettingsManager.prototype.useFile = function (key) {
+    this.fileKey = key || null;
+    this.resetToDefaults();
+    if (this._loadFrom(this.fileKey)) return true;
+    this._loadFrom(this.sharedKey);
+    return false;
+  };
+
+  /**
+   * 保存先だけ変える。いまの値はそのまま。
+   * 拠点で別のファイルへセーブしたとき、いまの設定ごとそのファイルへ移るため
+   */
+  SettingsManager.prototype.bindFile = function (key) {
+    this.fileKey = key || null;
+  };
+
+  /** 新しく始めたファイル。既定値から（前のファイルの設定を持ち越さない） */
+  SettingsManager.prototype.useNewFile = function (key) {
+    this.fileKey = key || null;
+    this.resetToDefaults();
+  };
 
   /** すべての項目を既定値に戻す */
   SettingsManager.prototype.resetToDefaults = function () {
@@ -89,14 +137,42 @@
 
   // --- 保存・読み込み ---
 
-  /** @returns {{success:boolean, reason:string}} */
+  /**
+   * いまのファイルの保存先と、最後に保存した設定の写しの両方へ書く。
+   * @returns {{success:boolean, reason:string}}
+   */
   SettingsManager.prototype.save = function () {
     if (!isAvailable()) return { success: false, reason: "unavailable" };
     try {
-      window.localStorage.setItem(this.storageKey, JSON.stringify(this.values));
+      var text = JSON.stringify(this.values);
+      if (this.fileKey) window.localStorage.setItem(this.fileKey, text);
+      window.localStorage.setItem(this.sharedKey, text);
       return { success: true, reason: "saved" };
     } catch (e) {
       return { success: false, reason: "error" };
+    }
+  };
+
+  /** いまの保存先から読み込む */
+  SettingsManager.prototype.load = function () {
+    return this._loadFrom(this.fileKey || this.sharedKey);
+  };
+
+  /**
+   * ファイルごとに分ける前から遊んでいたファイルへ、共通の設定を写す。
+   * すでに設定を持っているファイルには触らない。
+   * @param {string[]} keys 写す先（中身のあるファイルの設定キー）
+   */
+  SettingsManager.prototype.migrateShared = function (keys) {
+    if (!isAvailable()) return;
+    try {
+      var raw = window.localStorage.getItem(this.sharedKey);
+      if (!raw) return;
+      for (var i = 0; i < keys.length; i++) {
+        if (!window.localStorage.getItem(keys[i])) window.localStorage.setItem(keys[i], raw);
+      }
+    } catch (e) {
+      // 写せなくても遊べる（そのファイルは最後に保存した設定を使う）
     }
   };
 
@@ -105,12 +181,12 @@
    * 定義に無い項目は無視し、値は範囲内へ丸める（データ変更後も安全に読める）。
    * @returns {boolean} 読み込めたか
    */
-  SettingsManager.prototype.load = function () {
-    if (!isAvailable()) return false;
+  SettingsManager.prototype._loadFrom = function (key) {
+    if (!key || !isAvailable()) return false;
 
     var raw;
     try {
-      raw = window.localStorage.getItem(this.storageKey);
+      raw = window.localStorage.getItem(key);
     } catch (e) {
       return false;
     }

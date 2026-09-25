@@ -17,7 +17,8 @@
     this.data = gameData;
     this.assets = assets;
 
-    // プレイヤー設定はゲーム全体で共有する（画面をまたいでも保持される）
+    // プレイヤー設定。画面をまたいで保持し、中身はセーブファイルごとに切り替わる
+    // （ファイルを選ぶまでは、最後に遊んだファイルの設定）
     this.settings = new NS.SettingsManager(gameData);
     // キャンバスを渡すことで、マウス操作も受け取れるようにする。
     // 設定も渡すことで、ホイールの速さが設定画面の値に従う
@@ -29,9 +30,12 @@
     // セーブの窓口。どの画面からでも同じ中身で書き出せるよう、ここで1つだけ持つ
     // （画面ごとに保存する項目を書き並べていたころは、項目を増やすと入れ忘れが起きた）
     this.saveManager = new NS.SaveManager(gameData);
+    this._migrateSettings();
 
     // 初めての場面で出す説明。どの画面からも同じ記録を見るので、ここで1つだけ持つ
     this.tutorial = new NS.TutorialSystem(gameData, this.settings);
+    // 物語の場面。見た記録はチュートリアルと同じくセーブファイルごと
+    this.story = new NS.StorySystem(gameData);
 
     // 音。画面をまたいでBGMを流し続けるので、ここで1つだけ持つ
     this.audio = new NS.AudioManager(gameData, this.settings);
@@ -60,7 +64,45 @@
    * @param {number} slot 1〜（data/save.js の slotCount）
    */
   Game.prototype.setSaveSlot = function (slot) {
-    return this.saveManager.setSlot(slot);
+    var n = this.saveManager.setSlot(slot);
+    // 設定の書き先も同じファイルへ向ける。値は変えない
+    // （拠点で別のファイルへセーブしたら、いまの設定ごとそちらへ移る）
+    this.settings.bindFile(this.saveManager.settingsKeyFor(n));
+    return n;
+  };
+
+  // --- 設定はセーブファイルごと（SettingsManager の冒頭を参照） ---
+
+  /** いまのファイルの設定を読む（続きから・中断から） */
+  Game.prototype.loadFileSettings = function () {
+    this.settings.useFile(this.saveManager.settingsKeyFor(this.saveManager.slot));
+    this.audio.applyVolume();
+  };
+
+  /** 新しく始めたファイルの設定。既定値から（書くのは最初のセーブのとき） */
+  Game.prototype.resetFileSettings = function () {
+    this.settings.useNewFile(this.saveManager.settingsKeyFor(this.saveManager.slot));
+    this.audio.applyVolume();
+  };
+
+  /** タイトルに戻ったとき。最後に遊んだファイルの設定にする */
+  Game.prototype.useTitleSettings = function () {
+    this.settings.useShared();
+    this.audio.applyVolume();
+  };
+
+  /**
+   * ファイルごとに分ける前の共通の設定を、中身のあるファイルへ写す（起動時に1回）。
+   * 写さないと、分ける前から遊んでいたファイルの音量などが既定値に戻ってしまう
+   */
+  Game.prototype._migrateSettings = function () {
+    var keys = [];
+    for (var i = 1; i <= this.saveManager.slotCount; i++) {
+      if (this.saveManager.hasSave(i) || this.saveManager.hasSuspend(i)) {
+        keys.push(this.saveManager.settingsKeyFor(i));
+      }
+    }
+    this.settings.migrateShared(keys);
   };
 
   /** いま遊んでいるセーブファイルの番号 */
@@ -89,6 +131,27 @@
     return NS.PlayerLook.resolveColorId(this.data, this.playerColor);
   };
 
+  /**
+   * 主人公の性別（data/player.js の genders の id）。無い id なら既定に落とす。
+   * ★ ゲームの進み方には何も影響しない。選んだものを覚えておくだけ
+   */
+  Game.prototype.getPlayerGender = function () {
+    var player = this.data.player || {};
+    var list = player.genders || [];
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === this.playerGender) return this.playerGender;
+    }
+    return player.defaultGender || (list[0] ? list[0].id : null);
+  };
+
+  /** 主人公の一人称。物語の台詞の {me} に差し込まれる */
+  Game.prototype.getPlayerFirstPerson = function () {
+    var player = this.data.player || {};
+    var list = player.firstPersons || [];
+    if (this.playerFirstPerson && list.indexOf(this.playerFirstPerson) >= 0) return this.playerFirstPerson;
+    return player.defaultFirstPerson || list[0] || "";
+  };
+
   Game.prototype.ensureProgress = function () {
     var random = new NS.Random();
 
@@ -113,6 +176,9 @@
     if (!this.offBlessings) {
       this.offBlessings = {};
     }
+    if (!this.doneEvents) {
+      this.doneEvents = {};
+    }
     if (typeof this.gold !== "number") {
       this.gold = (this.data.player || {}).startingGold || 0;
     }
@@ -134,7 +200,7 @@
    * @returns {{success:boolean, reason:string}}
    */
   Game.prototype.saveProgress = function (dungeonState) {
-    return this.saveManager.save({
+    var result = this.saveManager.save({
       floor: (dungeonState && dungeonState.floor) || 1,
       party: this.party,
       storage: this.storage,
@@ -142,9 +208,14 @@
       gold: this.gold,
       discovery: this.discovery,
       tutorial: this.tutorial,
-      // 主人公の名前と服の色。冒険ごとに違うのでセーブに入れる
+      story: this.story,
+      // 主人公の名前・服の色・性別・一人称。冒険ごとに違うのでセーブに入れる
       playerName: this.playerName,
       playerColor: this.playerColor,
+      playerGender: this.playerGender,
+      playerFirstPerson: this.playerFirstPerson,
+      // 一度きりの出来事（ヨミリュウの待ち伏せなど）を済ませたか
+      doneEvents: this.doneEvents,
       clearedDungeons: this.clearedDungeons,
       boughtBlessings: this.boughtBlessings,
       offBlessings: this.offBlessings,
@@ -156,6 +227,10 @@
         playerRow: dungeonState.playerRow
       } : null
     });
+    // 設定も一緒に書く。チュートリアルを Esc で止めたときのように、
+    // 設定画面を通らずに変わった値も、セーブすればそのファイルに残る
+    if (result.success) this.settings.save();
+    return result;
   };
 
   /**
@@ -200,7 +275,7 @@
       featureData.push({ col: f.col, row: f.row, type: f.type, used: !!f.used, revealed: !!f.revealed });
     }
 
-    return this.saveManager.saveSuspend({
+    var result = this.saveManager.saveSuspend({
       floor: dungeonState.floor,
       party: this.party,
       storage: this.storage,
@@ -208,8 +283,12 @@
       gold: this.gold,
       discovery: this.discovery,
       tutorial: this.tutorial,
+      story: this.story,
       playerName: this.playerName,
       playerColor: this.playerColor,
+      playerGender: this.playerGender,
+      playerFirstPerson: this.playerFirstPerson,
+      doneEvents: this.doneEvents,
       clearedDungeons: this.clearedDungeons,
       boughtBlessings: this.boughtBlessings,
       offBlessings: this.offBlessings,
@@ -223,6 +302,8 @@
       run: runData,
       features: featureData
     });
+    if (result.success) this.settings.save();   // saveProgress と同じ
+    return result;
   };
 
   /**
@@ -239,8 +320,14 @@
     // 名前と色。古いセーブには無いので、その場合は既定のまま
     this.playerName = state.playerName || null;
     this.playerColor = state.playerColor || null;
+    // 性別・一人称。古いセーブには無いので、その場合は既定（data/player.js）
+    this.playerGender = state.playerGender || null;
+    this.playerFirstPerson = state.playerFirstPerson || null;
+    this.doneEvents = state.doneEvents || {};
     // この仕組みより前のセーブは「全部もう見た」扱いにする
     this.tutorial.loadSaveData(state.tutorial, true);
+    // 物語も同じ。この仕組みより前のセーブにオープニングを見せない
+    this.story.loadSaveData(state.story, true);
     this.clearedDungeons = state.clearedDungeons || {};
     this.boughtBlessings = state.boughtBlessings || {};
     this.offBlessings = state.offBlessings || {};
@@ -269,6 +356,7 @@
     if (!def) return { success: false, reason: "broken" };
 
     this.applyLoadedState(state);
+    this.loadFileSettings();
     this.beginRun(def);
 
     // 挑戦の記録を戻す。加護は id から定義を引き直す
@@ -309,6 +397,36 @@
 
   Game.prototype.isDungeonCleared = function (dungeonId) {
     return !!(this.clearedDungeons && this.clearedDungeons[dungeonId]);
+  };
+
+  // --- 一度きりの出来事（data/dungeons.js の events）---
+
+  Game.prototype.isEventDone = function (eventId) {
+    return !!(this.doneEvents && this.doneEvents[eventId]);
+  };
+
+  /** 済ませた印を付ける。起きた瞬間に付けるので、逃げても負けても二度は起きない */
+  Game.prototype.markEventDone = function (eventId) {
+    if (!eventId) return;
+    if (!this.doneEvents) this.doneEvents = {};
+    this.doneEvents[eventId] = true;
+  };
+
+  /**
+   * 出来事の戦いの結果を残す（"win" / "lose" / "flee" / "scouted"。BattleSystem の結果そのまま）。
+   * 物語の場面を結果で分けるのに使う（data/story.js の when.result）。
+   * 印は true のかわりに結果の文字が入るだけなので、「済ませたか」の判定はそのまま効く
+   */
+  Game.prototype.setEventResult = function (eventId, result) {
+    if (!eventId || !result) return;
+    if (!this.doneEvents) this.doneEvents = {};
+    this.doneEvents[eventId] = result;
+  };
+
+  /** 出来事の戦いの結果（残っていなければ null） */
+  Game.prototype.getEventResult = function (eventId) {
+    var value = this.doneEvents && this.doneEvents[eventId];
+    return (typeof value === "string") ? value : null;
   };
 
   // --- 加護の持ち物（挑戦をまたいで残る） ---
@@ -738,6 +856,10 @@
       for (j = 0; j < lists[i].length; j++) {
         this.discovery.markMonsterCaught(lists[i][j].speciesId);
         this.recordLearnedSkills(lists[i][j]);
+        // 愛情度の段階も拾い直す（図鑑の記録をどこまで読めるか）
+        if (lists[i][j].getAffectionStageIndex && this.discovery.markAffectionStage) {
+          this.discovery.markAffectionStage(lists[i][j].speciesId, lists[i][j].getAffectionStageIndex());
+        }
       }
     }
 
@@ -762,6 +884,27 @@
     for (var i = 0; i < skills.length; i++) {
       this.discovery.markSkillLearned(skills[i]);
     }
+  };
+
+  /**
+   * その場面の物語がまだなら流してから、次の画面へ移る。無ければそのまま次の画面へ。
+   *
+   * ★ 物語を足したい場面では、scenes.change(次) の代わりにこれを呼ぶだけでよい。
+   *   どの物語が流れるかは data/story.js の trigger で決まる。
+   *
+   * @param {string} trigger data/story.js の trigger
+   * @param {object} nextScene 物語のあと（または物語が無いとき）に移る画面
+   * @returns {boolean} 物語を流したか
+   */
+  Game.prototype.playStory = function (trigger, nextScene) {
+    var story = this.story.take(trigger, this);
+    if (!story) {
+      this.scenes.change(nextScene);
+      return false;
+    }
+    // trigger も渡すと、流し終えたときに同じきっかけの続きを探してくれる
+    this.scenes.change(new NS.StoryScene(this, story, nextScene, trigger));
+    return true;
   };
 
   Game.prototype.start = function () {

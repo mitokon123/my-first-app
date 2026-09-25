@@ -1,9 +1,10 @@
 /**
  * sprites_abyss.js
- * 地方「深淵（abyss）」に出るモンスターの絵。
+ * 揺籃の穴（region: "cradle"）に出るモンスターの絵。
  *
- * ここに入るのは、data/dungeons.js で region: "abyss" になっている
- * ダンジョン（苔むす坑道・灼熱の亀裂・静寂の深層）に出る種族。
+ * ここに入るのは、揺籃の穴のダンジョンのうち
+ * 苔むす坑道・灼熱の亀裂・静寂の深層に出る種族（毒沼は data/sprites_marsh.js）。
+ * ★ ファイル名は地方の id を "cradle" にする前のまま（読み込み先を変えないため）。
  *
  * 別の地方が増えたら data/sprites_〇〇.js を新しく作る。
  * 書き方（パレット・pixels）と分け方の方針は data/sprites.js を参照。

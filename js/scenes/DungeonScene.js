@@ -144,6 +144,7 @@
       this._generate();
     }
     this.encounters.setFloor(this.floor);
+    this._floorSteps = 0;
   };
 
   /**
@@ -193,6 +194,8 @@
 
     // 敵の出方は階ごとに変わる（data/dungeons.js の perFloor）
     this.encounters.setFloor(this.floor);
+    // その階で歩いた歩数。一度きりの出来事（events の afterSteps）に使う
+    this._floorSteps = 0;
   };
 
   /**
@@ -422,6 +425,10 @@
 
       // 毒などで歩くたびに削れる（1歩進めたときだけ）
       this._applyWalkDamage();
+
+      // 一度きりの出来事（ヨミリュウの待ち伏せなど）。仕掛けや遭遇より先に見る
+      this._floorSteps = (this._floorSteps || 0) + 1;
+      if (this._checkEvents()) return;
 
       // 仕掛けマス（宝箱・泉・罠）。踏んだターンは敵と遭遇しない
       if (this._checkFeature()) return;
@@ -664,6 +671,82 @@
     this.game.scenes.change(battle, "encounter");
   };
 
+  // --- 一度きりの出来事（data/dungeons.js の events）---
+
+  /**
+   * この階・この歩数で起きる出来事があれば起こす。
+   * @returns {boolean} 起きたか
+   */
+  DungeonScene.prototype._checkEvents = function () {
+    var events = (this.definition && this.definition.events) || [];
+    var dungeonId = this.definition && this.definition.id;
+
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      if (ev.floor !== this.floor) continue;
+      if (this._floorSteps < (ev.afterSteps || 1)) continue;
+      if (this.game.isEventDone(ev.id)) continue;
+      if (ev.onlyBeforeClear && this.game.isDungeonCleared(dungeonId)) continue;
+
+      // 起きた瞬間に済ませた印を付ける（逃げても負けても二度は起きない）
+      this.game.markEventDone(ev.id);
+      return this._startEventBattle(ev);
+    }
+    return false;
+  };
+
+  /**
+   * 出来事の相手の出現表の1件。
+   * その階の出現表に同じ種族があればそれを使う（倍率と行動の順番を1か所で調整できるように）
+   */
+  DungeonScene.prototype._eventEntry = function (ev) {
+    var table = this.encounters.getTable();
+    for (var i = 0; i < table.length; i++) {
+      if (table[i].species === ev.enemy) return table[i];
+    }
+    return { species: ev.enemy };
+  };
+
+  DungeonScene.prototype._startEventBattle = function (ev) {
+    var self = this;
+    var enemy = this.encounters.createEnemyFrom(this._eventEntry(ev));
+    if (!enemy) return false;
+
+    var template = ((this.game.data.messages || {}).events || {})[ev.message];
+    var battle = new NS.BattleScene(
+      this.game,
+      this.game.party,
+      [enemy],
+      this,
+      function (result) { return self._onEventBattleFinished(result, ev); },
+      {
+        allowFlee: ev.allowFlee !== false,
+        allowScout: ev.allowScout !== false,
+        introMessage: template ? template.replace("{name}", enemy.getName()) : null,
+        bgm: ev.bgm || null
+      }
+    );
+    this._enterBattle(battle);
+    return true;
+  };
+
+  /**
+   * 出来事の戦いが終わったとき。
+   * keepItemsOnDefeat の出来事は、負けても「無事に帰った」扱いで拠点へ戻す（拾ったものは残る）
+   * @returns {boolean} 遷移を自前で行った場合 true
+   */
+  DungeonScene.prototype._onEventBattleFinished = function (result, ev) {
+    // 結果を残す（物語の場面を「負けて戻った／誘って戻った」などで分けるため）
+    this.game.setEventResult(ev.id, result);
+
+    if (result === "lose" && ev.keepItemsOnDefeat) {
+      this.encounters.resetGrace();
+      this._returnToHome(true, "defeated");
+      return true;
+    }
+    return this._onBattleFinished(result);
+  };
+
   /** ボス戦を開始する。捕獲・逃走の可否はボス定義（data/bosses.js）に従う */
   DungeonScene.prototype._startBossBattle = function (boss) {
     var self = this;
@@ -799,6 +882,9 @@
    */
   DungeonScene.prototype._returnToHome = function (survived, outcome, autoSave) {
     if (this.game.run) this.game.run.recordFloor(this.floor);
+
+    // 全滅した印（初めて全滅したときの物語に使う。ヨミリュウの待ち伏せで負けたときも含む）
+    if (!survived || outcome === "defeated") this.game.markEventDone("defeated");
 
     var summary = this.game.run ? this.game.run.getSummary() : null;
     var lost = this.game.endRun(survived);

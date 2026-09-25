@@ -94,10 +94,12 @@
     // 「戻る」ボタン。何かを選んでいる途中なら一覧へ戻す
     if (this.backButton.handleInput(input)) {
       if (this.mode === "list") this.game.scenes.change(this.returnScene);
+      else if (this.mode === "affection") this.mode = "inspect";   // 愛情度の詳細は「様子を見る」へ戻す
       else { this.mode = "list"; this.reorderFrom = -1; }
       return;
     }
 
+    if (this.mode === "affection") { this._updateAffectionMode(input); return; }
     if (this.mode === "equip")   { this._updateEquipMode(input); return; }
     if (this.mode === "action")  { this._updateActionMode(input); return; }
     if (this.mode === "reorder") { this._updateReorderMode(input); return; }
@@ -261,7 +263,22 @@
       if (input.isPressed("up")) this.index = (this.index - 1 + size) % size;
       if (input.isPressed("down")) this.index = (this.index + 1) % size;
     }
-    if (input.isPressed("cancel") || input.isPressed("confirm")) this.mode = "list";
+
+    // 愛情度の欄を押す（または決定）と、愛情度の詳細を開く
+    var pointer = input.getPointer ? input.getPointer() : null;
+    var clicked = pointer && pointer.clicked && this._affectionRect &&
+                  NS.Panel.containsPoint(this._affectionRect, pointer);
+    if (clicked || input.isPressed("confirm")) { this.mode = "affection"; return; }
+
+    if (input.isPressed("cancel")) this.mode = "list";
+  };
+
+  /** 愛情度の詳細：決定・Esc・クリックで「様子を見る」へ戻る */
+  PartyScene.prototype._updateAffectionMode = function (input) {
+    var pointer = input.getPointer ? input.getPointer() : null;
+    if (input.isPressed("cancel") || input.isPressed("confirm") || (pointer && pointer.clicked)) {
+      this.mode = "inspect";
+    }
   };
 
   // --- 名前をつける ---
@@ -530,8 +547,11 @@
     this.renderer.clear(L.background || "#000000", w, h);
 
     // 様子を見ている間は画面ぜんぶを使う（一覧もタブも出さない）
-    if (this.mode === "inspect") {
-      this._renderInspect(this._currentList().get(this.index));
+    if (this.mode === "inspect" || this.mode === "affection") {
+      var inspected = this._currentList().get(this.index);
+      this._renderInspect(inspected);
+      // 愛情度の詳細は「様子を見る」の上に重ねる
+      if (this.mode === "affection") this._renderAffectionDetail(inspected);
       this._renderHint(L, t);
       this.backButton.render();
       return;
@@ -757,6 +777,7 @@
     var hint;
     if (this.mode === "equip") hint = this.texts.hintEquip;
     else if (this.mode === "inspect") hint = this.texts.hintInspect;
+    else if (this.mode === "affection") hint = this.texts.hintAffection;
     else if (this.mode === "action") hint = this.texts.hintAction;
     else if (this.mode === "reorder") hint = this.texts.hintReorder;
     else if (this.tab === "storage" && this.game.storage.isEmpty()) {
@@ -1078,6 +1099,7 @@
     this.panel.drawText("Lv" + monster.level + "　" + (nature ? nature.name : "-"),
       sp.x, ((L.name || {}).y || 268) + 24,
       { align: "center", font: t.smallFont, color: t.subTextColor });
+    this._renderAffection(monster, sp.x, ((L.name || {}).y || 268) + 42);
 
     // 左の下：技と特性（中央をステータスと装備に空けるため、こちらへ）
     this._renderInspectSkills(monster, L.left || { x: 64, y: 316, lineHeight: 20 });
@@ -1103,6 +1125,167 @@
       // 枠の内側まで。ここを越えるなら出どころの表記を省く
       maxX: rect.x + rect.w - (t.padding || 10)
     });
+  };
+
+  /**
+   * 様子を見る：名前の下の愛情度。「愛情度 慣れ（32/60）」の形で、次の段階までの数を出す。
+   * いちばん上の段階では、合計の数だけ出す
+   */
+  PartyScene.prototype._renderAffection = function (monster, x, y) {
+    this._affectionRect = null;
+    if (!monster.getAffectionStage) return;
+    var stage = monster.getAffectionStage();
+    if (!stage) return;
+    var next = monster.getNextAffectionStage();
+    var count = next ? (monster.affection + "/" + next.need) : String(monster.affection);
+    var text = (this.texts.affectionLabel || "愛情度 {stage}（{count}）")
+      .replace("{stage}", stage.name).replace("{count}", count);
+
+    // 押せることが分かるよう、枠で囲んだ札にする。カーソルが乗ると枠が光る
+    var t = this.theme;
+    var ctx = this.panel.ctx;
+    ctx.font = t.smallFont || "12px monospace";
+    var w = ctx.measureText(text).width + 16;
+    var rect = { x: Math.round(x - w / 2), y: y - 13, w: Math.round(w), h: 19 };
+    var pointer = this.game.input.getPointer ? this.game.input.getPointer() : null;
+    var hovered = pointer && pointer.inside && NS.Panel.containsPoint(rect, pointer);
+
+    ctx.save();
+    ctx.strokeStyle = hovered ? (t.cursorColor || "#ffd75e") : (t.panelBorder || "#3a4560");
+    ctx.lineWidth = 1;
+    ctx.strokeRect(rect.x + 0.5, rect.y + 0.5, rect.w - 1, rect.h - 1);
+    ctx.restore();
+    this.panel.drawText(text, x, y, { align: "center", font: t.smallFont, color: t.cursorColor });
+    this._affectionRect = rect;
+  };
+
+  /** 段階ごとの報酬の文（「全能力 +3%」など）。伏せるときは「？？？」 */
+  PartyScene.prototype._affectionRewardText = function (monster, stages, i) {
+    var stage = stages[i];
+    var config = this.game.data.affection || {};
+    var parts = [];
+
+    if (stage.statBonus) {
+      var total = 0;
+      for (var k = 0; k <= i; k++) total += stages[k].statBonus || 0;
+      var text = (this.texts.affectionStatReward || "全能力 +{value}%")
+        .replace("{value}", Math.round(stage.statBonus * 100));
+      // 前の段階のぶんに足していくので、合わせた値も添える
+      if (total > stage.statBonus) {
+        text += (this.texts.affectionStatTotal || "（合わせて +{value}%）")
+          .replace("{value}", Math.round(total * 100));
+      }
+      parts.push(text);
+    }
+
+    if (stage.bondReward) {
+      var reached = monster.getAffectionStageIndex() >= i;
+      if (config.hideBondRewardUntilReached && !reached) {
+        parts.push(this.texts.affectionHidden || "？？？");
+      } else {
+        var reward = monster.getBondReward ? monster.getBondReward() : null;
+        var described = this._bondRewardText(reward);
+        parts.push(described || this.texts.affectionNoReward || "―");
+      }
+    }
+    return parts.length > 0 ? parts.join("・") : "―";
+  };
+
+  /** 種族ごとの報酬（data/monsters.js の bondReward）を文にする */
+  PartyScene.prototype._bondRewardText = function (reward) {
+    if (!reward) return "";
+    var gameData = this.game.data;
+    var parts = [];
+    if (reward.skill) {
+      var skill = gameData.getSkill(reward.skill);
+      parts.push((this.texts.affectionSkillReward || "「{skill}」を覚える")
+        .replace("{skill}", skill ? skill.name : reward.skill));
+    }
+    for (var i = 0; i < (reward.effects || []).length; i++) {
+      var text = NS.EffectSystem.describeEffect(reward.effects[i], gameData);
+      if (text) parts.push(text);
+    }
+    return parts.join("・");
+  };
+
+  /**
+   * 愛情度の詳細。「様子を見る」の上に重ねる窓。
+   *   いまの段階と、次の段階までの残り（棒で見せる）
+   *   段階の一覧（必要な回数・報酬。届いた段階には印）
+   *   深まり方の説明
+   * 配置は data/ui.js の party.affectionDetail、文言は data/messages.js の party
+   */
+  PartyScene.prototype._renderAffectionDetail = function (monster) {
+    if (!monster || !monster.getAffectionStage) return;
+    var t = this.theme;
+    var A = this.layout.affectionDetail || {};
+    var box = A.box || { x: 150, y: 96, w: 500, h: 380 };
+    var ctx = this.panel.ctx;
+    var stages = (this.game.data.affection || {}).stages || [];
+    var current = monster.getAffectionStageIndex();
+    var stage = stages[current];
+    var next = stages[current + 1] || null;
+
+    // 後ろの「様子を見る」を暗くして、窓を浮かせる
+    ctx.save();
+    ctx.fillStyle = "rgba(0,0,0,0.55)";
+    ctx.fillRect(0, 0, this.game.canvas.width, this.game.canvas.height);
+    ctx.restore();
+    this.panel.drawBox(box);
+
+    var x = box.x + (A.padX || 24);
+    var y = box.y + (A.padTop || 36);
+
+    this.panel.drawText((this.texts.affectionTitle || "{name} との関係").replace("{name}", monster.getName()),
+      x, y, { font: t.largeFont });
+    y += A.titleGap || 32;
+
+    // いまの段階と、次まで
+    this.panel.drawText((this.texts.affectionNow || "いまの段階：{stage}（{count}回）")
+      .replace("{stage}", stage ? stage.name : "-").replace("{count}", monster.affection),
+      x, y, { color: t.cursorColor });
+    y += 22;
+
+    var barW = box.w - (A.padX || 24) * 2;
+    var from = stage ? (stage.need || 0) : 0;
+    var ratio = next ? Math.max(0, Math.min(1, (monster.affection - from) / ((next.need || 1) - from))) : 1;
+    ctx.save();
+    ctx.fillStyle = t.hpBarBack || "#1a2033";
+    ctx.fillRect(x, y - 8, barW, 8);
+    ctx.fillStyle = A.barColor || t.cursorColor || "#ffd75e";
+    ctx.fillRect(x, y - 8, Math.round(barW * ratio), 8);
+    ctx.restore();
+    y += 18;
+
+    var remain = next
+      ? (this.texts.affectionNext || "次の「{stage}」まで あと {n} 回").replace("{stage}", next.name)
+          .replace("{n}", Math.max(0, (next.need || 0) - monster.affection))
+      : (this.texts.affectionMax || "いちばん深い段階に届いている");
+    this.panel.drawText(remain, x, y, { font: t.smallFont, color: t.subTextColor });
+    y += A.sectionGap || 30;
+
+    // 段階の一覧
+    var colNeed = A.colNeed || 110;
+    var colReward = A.colReward || 180;
+    for (var i = 0; i < stages.length; i++) {
+      var reached = i <= current;
+      var mark = (i === current) ? "▶" : (reached ? "✓" : "・");
+      var color = reached ? t.textColor : t.hintColor;
+      this.panel.drawText(mark + " " + stages[i].name, x, y, { color: i === current ? t.cursorColor : color });
+      this.panel.drawText((this.texts.affectionNeed || "{n}回").replace("{n}", stages[i].need || 0),
+        x + colNeed, y, { color: color });
+      this.panel.drawText(this._affectionRewardText(monster, stages, i), x + colReward, y,
+        { font: t.smallFont, color: color });
+      y += A.rowHeight || 26;
+    }
+    y += 10;
+
+    // 深まり方
+    var notes = this.texts.affectionNotes || [];
+    for (var n = 0; n < notes.length; n++) {
+      this.panel.drawText(notes[n], x, y, { font: t.smallFont, color: t.subTextColor });
+      y += 18;
+    }
   };
 
   /** 様子を見る：左の下の、技と特性 */
@@ -1213,6 +1396,27 @@
     for (j = 0; j < equipment.length; j++) {
       var item = gameData.getItem(equipment[j]);
       if (item) push((item.equip || {}).effects, item.name);
+    }
+
+    // 愛情度の上がり。全能力に同じだけ掛かるので、1行にまとめる
+    var bonus = monster.getAffectionBonus ? monster.getAffectionBonus() : 0;
+    if (bonus > 0) {
+      var stage = monster.getAffectionStage();
+      lines.push({
+        text: (this.texts.affectionEffect || "全能力 ×{value}").replace("{value}", String(Math.round((1 + bonus) * 100) / 100)),
+        from: stage ? stage.name : ""
+      });
+    }
+
+    // 絆の報酬の能力・耐性。装備と違って外せないので、数値の隣の「(+5)」には出ない。
+    // ここでは加算も含めて全部並べる
+    if (monster.hasReachedBondReward && monster.hasReachedBondReward()) {
+      var reward = monster.getBondReward();
+      var bondName = (((gameData.affection || {}).stages || []).filter(function (s) { return s.bondReward; })[0] || {}).name || "";
+      for (var b = 0; b < ((reward && reward.effects) || []).length; b++) {
+        var bondText = NS.EffectSystem.describeEffect(reward.effects[b], gameData);
+        if (bondText) lines.push({ text: bondText, from: bondName });
+      }
     }
     return lines;
   };

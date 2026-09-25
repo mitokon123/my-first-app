@@ -75,6 +75,8 @@
   };
 
   TitleScene.prototype.enter = function () {
+    // どのファイルも選んでいないので、最後に遊んだファイルの設定（音量など）に戻す
+    this.game.useTitleSettings();
     this.game.audio.playBgm("title");
     // 中断の有無は探索から戻るたびに変わるので、開くたびに組み直す
     this._buildMenu();

@@ -14,6 +14,7 @@
  *   inventory : 持ち物
  *   gold      : 所持金
  *   discovery : 図鑑の発見記録
+ *   tutorial / story : どの説明・どの物語の場面をもう見たか
  *   playTime  : そのファイルの合計プレイ時間（ミリ秒）。ファイル選択の一覧に出す
  *   dungeon   : マップとプレイヤー位置（続きから同じ場所で再開するため）
  */
@@ -30,6 +31,7 @@
     this.storageKey = config.storageKey || "game.save";
     this.slotSuffix = config.slotSuffix || ".slot";
     this.suspendSuffix = config.suspendSuffix || ".suspend";
+    this.settingsSuffix = config.settingsSuffix || ".settings";
     this.slotCount = config.slotCount || 1;
     this.saveVersion = config.saveVersion || 1;
 
@@ -57,6 +59,15 @@
   /** そのスロットの中断データの保存先キー（セーブ本体とは別） */
   SaveManager.prototype.suspendKeyFor = function (slot) {
     return this.keyFor(slot) + this.suspendSuffix;
+  };
+
+  /**
+   * そのスロットの設定（音量・戦闘速度など）の保存先キー。
+   * 書き読みは SettingsManager が行う。ここはキーを決めるのと、
+   * コピー・移動・削除でセーブと一緒に運ぶだけ
+   */
+  SaveManager.prototype.settingsKeyFor = function (slot) {
+    return this.keyFor(slot) + this.settingsSuffix;
   };
 
   function clampSlot(slot, count) {
@@ -111,9 +122,16 @@
       discovery: state.discovery ? state.discovery.toSaveData() : null,
       // どのチュートリアルを見たか。含めないと再開のたびに同じ説明が出る
       tutorial: state.tutorial ? state.tutorial.toSaveData() : null,
+      // どの物語の場面を見たか（data/story.js）。チュートリアルと同じ理由
+      story: state.story ? state.story.toSaveData() : null,
       // 主人公の名前と服の色（ファイルごとに違う）
       playerName: state.playerName || null,
       playerColor: state.playerColor || null,
+      // 性別と一人称（ゲームの進み方には影響しない。物語の {me} に使う）
+      playerGender: state.playerGender || null,
+      playerFirstPerson: state.playerFirstPerson || null,
+      // 一度きりの出来事を済ませたか（{ id: true }）。data/dungeons.js の events
+      doneEvents: state.doneEvents || null,
       clearedDungeons: state.clearedDungeons || null,
       // そのファイルの合計プレイ時間（ミリ秒）。ファイル選択の一覧に出す
       playTime: state.playTime || 0,
@@ -186,9 +204,16 @@
         //     いまさら「戦い方」を出しても邪魔なだけなので）
         //   その判断は Game 側で行うため、ここでは有無をそのまま渡す
         tutorial: payload.tutorial || null,
+        // 物語の記録。無い場合の扱いもチュートリアルと同じ（Game 側で「全部見た」にする）
+        story: payload.story || null,
         // 古いセーブには無い。その場合は既定の名前と色になる
         playerName: payload.playerName || null,
         playerColor: payload.playerColor || null,
+        playerGender: payload.playerGender || null,
+        playerFirstPerson: payload.playerFirstPerson || null,
+        // 古いセーブには無い。その場合は「まだ何も起きていない」扱い
+        // （起きるかどうかは出来事の条件で決まる。クリア済みの場所では起きない）
+        doneEvents: payload.doneEvents || {},
         // 古いセーブには無いので、その場合は「何もクリアしていない」扱い
         clearedDungeons: payload.clearedDungeons || {},
         // 合計プレイ時間（ミリ秒）。古いセーブには無いので0から数え直す
@@ -220,7 +245,7 @@
   };
 
   /**
-   * セーブデータを削除する（中断データも一緒に消す）。
+   * セーブデータを削除する（中断データと設定も一緒に消す）。
    * @param {number} [slot] 省略すると、いま扱っているスロット
    */
   SaveManager.prototype.clear = function (slot) {
@@ -229,6 +254,7 @@
     try {
       window.localStorage.removeItem(this.keyFor(n));
       window.localStorage.removeItem(this.suspendKeyFor(n));
+      window.localStorage.removeItem(this.settingsKeyFor(n));
       return true;
     } catch (e) {
       return false;
@@ -298,11 +324,14 @@
     try {
       window.localStorage.setItem(this.keyFor(to), raw);
 
-      // 中断データも一緒に運ぶ。行き先に古い中断が残っていれば消す
-      // （本体だけ新しくなって、中断だけ別の冒険のもの、という食い違いを防ぐ）
-      var suspend = window.localStorage.getItem(this.suspendKeyFor(from));
-      if (suspend) window.localStorage.setItem(this.suspendKeyFor(to), suspend);
-      else window.localStorage.removeItem(this.suspendKeyFor(to));
+      // 中断データと設定も一緒に運ぶ。行き先に古いものが残っていれば消す
+      // （本体だけ新しくなって、中断や設定だけ別の冒険のもの、という食い違いを防ぐ）
+      var extras = [this.suspendKeyFor, this.settingsKeyFor];
+      for (var i = 0; i < extras.length; i++) {
+        var value = window.localStorage.getItem(extras[i].call(this, from));
+        if (value) window.localStorage.setItem(extras[i].call(this, to), value);
+        else window.localStorage.removeItem(extras[i].call(this, to));
+      }
 
       return { success: true, reason: "copied" };
     } catch (e) {

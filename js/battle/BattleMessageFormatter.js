@@ -144,6 +144,8 @@
         return fill(t.levelUp, { actor: event.actorName, level: event.toLevel });
       case "skillLearned":
         return fill(t.skillLearned, { actor: event.actorName, skill: event.skillName });
+      case "affectionUp":
+        return fill(t.affectionUp, { actor: event.actorName, stage: event.stageName });
       case "fleeSuccess":
         return t.fleeSuccess || null;
       case "fleeFailed":

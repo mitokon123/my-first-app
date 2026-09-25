@@ -5,6 +5,7 @@
  * ▼ 出どころ
  *   特性（アビリティ）… 種族が持つもの。AbilitySystem が「どれが効くか」を決める
  *   装備             … 個体が身につけているもの（data/items.js の equip）
+ *   愛情度           … 個体の段階ごとの能力の上がり（data/affection.js）
  *   加護（ラン限定）  … 階を降りるたびに選んだもの。個体の runEffects に入っている
  *   その戦いの補正     … 敵として出ているあいだだけ。個体の encounterEffects に入っている
  *                      （主の statMultiplier と、特殊な出方をする在来種の両方）
@@ -55,6 +56,11 @@
     var equipments = this.getEquipments(monster);
     for (i = 0; i < equipments.length; i++) {
       effects = effects.concat((equipments[i].equip || {}).effects || []);
+    }
+
+    // 愛情度（段階ごとに全能力が少し上がる。data/affection.js）
+    if (monster.getAffectionEffects) {
+      effects = effects.concat(monster.getAffectionEffects());
     }
 
     // 加護（そのラン限り）。拠点へ戻ると Game が消す

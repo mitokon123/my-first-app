@@ -79,6 +79,25 @@
      * 名前を決めていないときに使う呼び名。
      * 文字盤（data/naming.js）で決めるので、最大文字数もそちらに従う。
      */
-    defaultName: "あなた"
+    defaultName: "あなた",
+
+    /**
+     * 性別と一人称。名前と見た目を決める画面で選ぶ（あとから設定でも変えられる）。
+     *
+     * ★ どちらも**ゲームの進み方には何も影響しない**（ストーリー構成.md の 2）。
+     *   性別と一人称は別々に選べる（組み合わせは自由）。
+     *   一人称は物語の台詞に {me} と書いたところへ差し込まれる（data/story.js）。
+     *
+     * 選択肢を増やすときは、配列に1つ足すだけでよい。
+     * 画面の1行に並ぶのは6つまで（data/ui.js の playerSetup.chip の幅で決まる）。
+     */
+    genders: [
+      { id: "male",   name: "男性" },
+      { id: "female", name: "女性" }
+    ],
+    defaultGender: "male",
+
+    firstPersons: ["私", "僕", "俺", "あたし", "うち", "自分"],
+    defaultFirstPerson: "私"
   };
 })(window.MyGame);

@@ -51,7 +51,6 @@
       {
         id: "general",
         name: "よろず屋",
-        subtitle: "深き穴のほとりの行商",
         keeper: "keeperGeneral",
         keeperMotion: "breathe",
         unlockedBy: null,

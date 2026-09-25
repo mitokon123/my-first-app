@@ -24,6 +24,12 @@
  *   いまの状態（マップ・位置・加護・拾ったもの）を書く。セーブ本体は書き換えない。
  *   再開すると中断データは消える（続きの続き、はできない。ローグライクの中断と同じ）。
  *   拠点でセーブするまでは、途中で閉じると最後のセーブ（拠点）に戻る。
+ *
+ * ▼ 設定（settingsSuffix）
+ *   音量・戦闘速度・チュートリアルなどの設定も、ファイルごとに持つ。
+ *   キーはそのスロットのキーに settingsSuffix を足したもの。
+ *   書くのは設定画面を閉じたときと、セーブ・中断したとき。
+ *   コピー・移動・削除ではセーブと一緒に運ぶ（SaveManager.copySlot / clear）。
  */
 (function (NS) {
   "use strict";
@@ -33,6 +39,7 @@
     slotCount: 3,
     slotSuffix: ".slot",
     suspendSuffix: ".suspend",
+    settingsSuffix: ".settings",
     saveVersion: 1
   };
 })(window.MyGame);

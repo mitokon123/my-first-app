@@ -1,6 +1,6 @@
 /**
  * PlayerSetupScene.js
- * 主人公の名前と服の色を決める画面。
+ * 主人公の名前・服の色・性別・一人称を決める画面。
  *
  * ▼ 2つの入口から同じ画面を使う
  *   ・新しく始めるとき（セーブファイルを選んだ直後）
@@ -17,11 +17,17 @@
  *   色の名前だけ並べても、着せたところが想像できない。
  *   選んでいる色の絵を大きく出し、歩かせて見せる。
  *
+ * ▼ 性別と一人称は、ゲームの進み方には何も影響しない（data/player.js）
+ *   一人称だけは、物語の台詞の {me} に差し込まれる。
+ *
  * 配置は data/ui.js の playerSetup、文言は data/messages.js の playerSetup。
- * 色そのものは data/player.js の appearance.colors。
+ * 色・性別・一人称の選択肢は data/player.js。
  */
 (function (NS) {
   "use strict";
+
+  // 上から並ぶ欄。left/right で選ぶのは color / gender / firstPerson の3つ
+  var ROWS = ["name", "color", "gender", "firstPerson", "done"];
 
   function PlayerSetupScene(game, returnScene, mode) {
     this.game = game;
@@ -39,16 +45,20 @@
     this.nameInput = new NS.NameInput(this.panel, game.data);
     this.backButton = new NS.BackButton(this.panel, game.data);
 
+    var player = game.data.player || {};
     this.colors = NS.PlayerLook.colorsOf(game.data);
+    this.genders = player.genders || [];
+    this.firstPersons = player.firstPersons || [];
 
     // いまの値から始める（あとから変えるときは、今の名前と色が入っている）
     this.name = game.getPlayerName();
     this.colorIndex = this._indexOfColor(game.getPlayerColor());
+    this.genderIndex = indexById(this.genders, game.getPlayerGender());
+    this.firstPersonIndex = Math.max(0, this.firstPersons.indexOf(game.getPlayerFirstPerson()));
 
-    // "main" … 名前と色を選ぶ / "name" … 文字盤を開いている
+    // "main" … 欄を選ぶ / "name" … 文字盤を開いている
     this.phase = "main";
-    // main での選択位置：0 = 名前、1 = 色、2 = これで決定
-    this.row = 0;
+    this.row = 0;   // ROWS の何番目か
   }
 
   PlayerSetupScene.prototype.enter = function () {
@@ -56,14 +66,59 @@
   };
 
   PlayerSetupScene.prototype._indexOfColor = function (colorId) {
-    for (var i = 0; i < this.colors.length; i++) {
-      if (this.colors[i].id === colorId) return i;
-    }
-    return 0;
+    return indexById(this.colors, colorId);
   };
 
   PlayerSetupScene.prototype._currentColor = function () {
     return this.colors[this.colorIndex] || null;
+  };
+
+  PlayerSetupScene.prototype._rowKind = function () {
+    return ROWS[this.row];
+  };
+
+  function indexById(list, id) {
+    for (var i = 0; i < list.length; i++) {
+      if (list[i].id === id) return i;
+    }
+    return 0;
+  }
+
+  // --- 選択肢（左右で送るもの）---
+
+  /**
+   * 左右で選ぶ欄の中身。欄ごとに「いくつあるか」「いま何番目か」を1か所で扱う。
+   * @returns {{count:number, get:function, set:function}|null}
+   */
+  PlayerSetupScene.prototype._choiceOf = function (kind) {
+    var self = this;
+    if (kind === "color") {
+      return { count: this.colors.length,
+               get: function () { return self.colorIndex; },
+               set: function (i) { self.colorIndex = i; } };
+    }
+    if (kind === "gender") {
+      return { count: this.genders.length,
+               get: function () { return self.genderIndex; },
+               set: function (i) { self.genderIndex = i; } };
+    }
+    if (kind === "firstPerson") {
+      return { count: this.firstPersons.length,
+               get: function () { return self.firstPersonIndex; },
+               set: function (i) { self.firstPersonIndex = i; } };
+    }
+    return null;
+  };
+
+  /** 性別・一人称の札に書く文字 */
+  PlayerSetupScene.prototype._chipLabels = function (kind) {
+    if (kind === "gender") {
+      var names = [];
+      for (var i = 0; i < this.genders.length; i++) names.push(this.genders[i].name || "");
+      return names;
+    }
+    if (kind === "firstPerson") return this.firstPersons.slice();
+    return [];
   };
 
   // --- 更新 ---
@@ -94,17 +149,14 @@
       return;
     }
 
-    if (input.isPressed("up")) this.row = (this.row + 2) % 3;
-    if (input.isPressed("down")) this.row = (this.row + 1) % 3;
+    if (input.isPressed("up")) this.row = (this.row + ROWS.length - 1) % ROWS.length;
+    if (input.isPressed("down")) this.row = (this.row + 1) % ROWS.length;
 
-    // 色は左右で送る。色の行にいなくても替えられると迷うので、行にいるときだけ
-    if (this.row === 1 && this.colors.length > 0) {
-      if (input.isPressed("left")) {
-        this.colorIndex = (this.colorIndex - 1 + this.colors.length) % this.colors.length;
-      }
-      if (input.isPressed("right")) {
-        this.colorIndex = (this.colorIndex + 1) % this.colors.length;
-      }
+    // 左右は、選ぶものがある欄にいるときだけ効く（別の欄にいて替わると迷う）
+    var choice = this._choiceOf(this._rowKind());
+    if (choice && choice.count > 0) {
+      if (input.isPressed("left")) choice.set((choice.get() - 1 + choice.count) % choice.count);
+      if (input.isPressed("right")) choice.set((choice.get() + 1) % choice.count);
     }
 
     this._handleMouse(input);
@@ -112,35 +164,42 @@
     if (input.isPressed("confirm")) this._activateRow();
   };
 
-  /** 色見本を直接押せるようにする */
+  /** 色見本・札・名前の欄・決定のボタンを直接押せるようにする */
   PlayerSetupScene.prototype._handleMouse = function (input) {
     if (!input.getPointer) return;
 
     var pointer = input.getPointer();
     if (!pointer.inside) return;
 
-    for (var i = 0; i < this.colors.length; i++) {
-      if (!NS.Panel.containsPoint(this._swatchRect(i), pointer)) continue;
-      if (pointer.moved || pointer.clicked) { this.row = 1; this.colorIndex = i; }
-      return;
+    // 色見本・性別・一人称の札
+    var kinds = ["color", "gender", "firstPerson"];
+    for (var k = 0; k < kinds.length; k++) {
+      var choice = this._choiceOf(kinds[k]);
+      for (var i = 0; i < choice.count; i++) {
+        if (!NS.Panel.containsPoint(this._optionRect(kinds[k], i), pointer)) continue;
+        if (pointer.moved || pointer.clicked) {
+          this.row = ROWS.indexOf(kinds[k]);
+          choice.set(i);
+        }
+        return;
+      }
     }
 
     // 名前の欄と決定のボタン
-    var nameRect = this._rowRect(0);
-    var doneRect = this._doneRect();
-    if (NS.Panel.containsPoint(nameRect, pointer)) {
-      if (pointer.moved) this.row = 0;
+    if (NS.Panel.containsPoint(this._rowRect(ROWS.indexOf("name")), pointer)) {
+      if (pointer.moved) this.row = ROWS.indexOf("name");
       if (pointer.clicked) this._openNameInput();
-    } else if (NS.Panel.containsPoint(doneRect, pointer)) {
-      if (pointer.moved) this.row = 2;
+    } else if (NS.Panel.containsPoint(this._doneRect(), pointer)) {
+      if (pointer.moved) this.row = ROWS.indexOf("done");
       if (pointer.clicked) this._finish();
     }
   };
 
   PlayerSetupScene.prototype._activateRow = function () {
-    if (this.row === 0) this._openNameInput();
-    else if (this.row === 2) this._finish();
-    // 色の行で決定を押しても何もしない（左右で選ぶものなので）
+    var kind = this._rowKind();
+    if (kind === "name") this._openNameInput();
+    else if (kind === "done") this._finish();
+    // 選ぶ欄で決定を押しても何もしない（左右で選ぶものなので）
   };
 
   PlayerSetupScene.prototype._openNameInput = function () {
@@ -151,36 +210,45 @@
   /** 決めた内容をゲームへ移して、次の画面へ進む */
   PlayerSetupScene.prototype._finish = function () {
     var color = this._currentColor();
+    var gender = this.genders[this.genderIndex];
 
     this.game.playerName = this.name;
     this.game.playerColor = color ? color.id : null;
+    this.game.playerGender = gender ? gender.id : null;
+    this.game.playerFirstPerson = this.firstPersons[this.firstPersonIndex] || null;
 
     if (this.mode === "edit") {
       this.game.scenes.change(this.returnScene);
       return;
     }
-    // 新規のときは、ここから冒険が始まる
-    this.game.scenes.change(new NS.HomeScene(this.game));
+    // 新規のときは、ここから冒険が始まる。オープニングを流してから拠点へ
+    this.game.playStory("newGame", new NS.HomeScene(this.game));
   };
 
   // --- 位置 ---
 
   PlayerSetupScene.prototype._rowRect = function (index) {
-    var r = this.layout.rows || { x: 300, y: 150, w: 420, h: 52, gap: 12 };
+    var r = this.layout.rows || { x: 310, y: 122, w: 442, h: 62, gap: 12 };
     return { x: r.x, y: r.y + (r.h + (r.gap || 0)) * index, w: r.w, h: r.h };
   };
 
-  /** 色見本1つぶんの四角 */
-  PlayerSetupScene.prototype._swatchRect = function (index) {
-    var s = this.layout.swatch || { x: 316, y: 226, size: 34, gap: 10 };
+  /** 選ぶ欄の、i 番目の選択肢の四角（色は色見本、性別・一人称は札） */
+  PlayerSetupScene.prototype._optionRect = function (kind, i) {
+    if (kind === "color") {
+      var s = this.layout.swatch || { x: 420, y: 210, size: 34, gap: 12 };
+      return { x: s.x + (s.size + (s.gap || 0)) * i, y: s.y, w: s.size, h: s.size };
+    }
+    var c = this.layout.chip || { x: 420, w: 48, h: 30, gap: 6 };
+    var row = this._rowRect(ROWS.indexOf(kind));
     return {
-      x: s.x + (s.size + (s.gap || 0)) * index,
-      y: s.y, w: s.size, h: s.size
+      x: c.x + (c.w + (c.gap || 0)) * i,
+      y: row.y + Math.floor((row.h - c.h) / 2),
+      w: c.w, h: c.h
     };
   };
 
   PlayerSetupScene.prototype._doneRect = function () {
-    return this.layout.done || { x: 300, y: 300, w: 420, h: 44 };
+    return this.layout.done || { x: 310, y: 426, w: 442, h: 52 };
   };
 
   // --- 描画 ---
@@ -203,6 +271,8 @@
     this._renderPreview();
     this._renderNameRow();
     this._renderColorRow();
+    this._renderChipRow("gender", this.texts.genderLabel || "性別");
+    this._renderChipRow("firstPerson", this.texts.firstPersonLabel || "一人称");
     this._renderDone();
     this._renderHint();
 
@@ -236,38 +306,40 @@
     }
   };
 
-  PlayerSetupScene.prototype._renderNameRow = function () {
-    var rect = this._rowRect(0);
-    var t = this.theme;
-    var selected = (this.row === 0) && this.phase === "main";
+  /** 欄の枠と、左の見出し。選んでいれば枠を光らせる */
+  PlayerSetupScene.prototype._renderRowFrame = function (kind, label) {
+    var rect = this._rowRect(ROWS.indexOf(kind));
+    var selected = (this._rowKind() === kind) && this.phase === "main";
 
     this.panel.drawBox(rect);
     if (selected) this._outline(rect);
 
     var origin = this.panel.innerOrigin(rect);
-    this.panel.drawText(this.texts.nameLabel || "なまえ", origin.x, origin.y + 20,
-      { font: t.smallFont, color: t.subTextColor });
-    this.panel.drawText(this.name || "", origin.x + 96, origin.y + 22,
-      { color: selected ? t.cursorColor : t.textColor });
-    this.panel.drawText(this.texts.nameAction || "", rect.x + rect.w - 12, origin.y + 22,
+    this.panel.drawText(label, origin.x, rect.y + rect.h / 2 + 5,
+      { font: this.theme.smallFont, color: this.theme.subTextColor });
+    return { rect: rect, selected: selected };
+  };
+
+  PlayerSetupScene.prototype._renderNameRow = function () {
+    var frame = this._renderRowFrame("name", this.texts.nameLabel || "なまえ");
+    var rect = frame.rect;
+    var t = this.theme;
+    var chips = this.layout.chip || { x: 420 };
+    var baseY = rect.y + rect.h / 2 + 6;
+
+    this.panel.drawText(this.name || "", chips.x, baseY,
+      { color: frame.selected ? t.cursorColor : t.textColor });
+    this.panel.drawText(this.texts.nameAction || "", rect.x + rect.w - 12, baseY,
       { align: "right", font: t.smallFont, color: t.hintColor });
   };
 
   PlayerSetupScene.prototype._renderColorRow = function () {
-    var rect = this._rowRect(1);
+    this._renderRowFrame("color", this.texts.colorLabel || "ふくの色");
     var t = this.theme;
-    var selected = (this.row === 1) && this.phase === "main";
-
-    this.panel.drawBox(rect);
-    if (selected) this._outline(rect);
-
-    var origin = this.panel.innerOrigin(rect);
-    this.panel.drawText(this.texts.colorLabel || "ふくの色", origin.x, origin.y + 20,
-      { font: t.smallFont, color: t.subTextColor });
 
     var ctx = this.panel.ctx;
     for (var i = 0; i < this.colors.length; i++) {
-      var sw = this._swatchRect(i);
+      var sw = this._optionRect("color", i);
       ctx.save();
       ctx.fillStyle = this.colors[i].base || "#888888";
       ctx.fillRect(sw.x, sw.y, sw.w, sw.h);
@@ -281,10 +353,36 @@
     }
   };
 
+  /** 性別・一人称の欄。選択肢を札にして横に並べ、選んでいるものだけ光らせる */
+  PlayerSetupScene.prototype._renderChipRow = function (kind, label) {
+    this._renderRowFrame(kind, label);
+
+    var t = this.theme;
+    var c = this.layout.chip || {};
+    var labels = this._chipLabels(kind);
+    var current = this._choiceOf(kind).get();
+    var ctx = this.panel.ctx;
+
+    for (var i = 0; i < labels.length; i++) {
+      var r = this._optionRect(kind, i);
+      var on = (i === current);
+
+      ctx.save();
+      ctx.strokeStyle = on ? (t.cursorColor || "#ffd75e") : (t.panelBorder || "#3a4560");
+      ctx.lineWidth = on ? 2 : 1;
+      ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+      ctx.restore();
+
+      this.panel.drawText(labels[i], r.x + r.w / 2, r.y + r.h / 2 + 5,
+        { align: "center", font: c.font || t.smallFont,
+          color: on ? (t.cursorColor || "#ffd75e") : t.subTextColor });
+    }
+  };
+
   PlayerSetupScene.prototype._renderDone = function () {
     var rect = this._doneRect();
     var t = this.theme;
-    var selected = (this.row === 2) && this.phase === "main";
+    var selected = (this._rowKind() === "done") && this.phase === "main";
 
     this.panel.drawBox(rect);
     if (selected) this._outline(rect);

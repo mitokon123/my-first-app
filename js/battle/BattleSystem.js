@@ -54,8 +54,10 @@
     this.result = null;
 
     // 枠を埋めるのはこのときだけ。以後は交代（replaceSlot）でしか変わらない
-    this.slots = aliveMembers(this.allies, this.fieldSize);
     this._resetFieldMarks();
+    this.slots = aliveMembers(this.allies, this.fieldSize);
+    // 最初から場に出ている仲間に印を付ける（勝ったときの愛情度に使う）
+    for (var i = 0; i < this.slots.length; i++) this.slots[i]._appeared = true;
   };
 
   /**
@@ -65,12 +67,14 @@
    *   _removed   … 盤面から取り除かれた（スカウトで仲間になった等）
    *                 消し忘れると、その個体は次の戦闘以降ずっと行動しなくなる
    *   _defending … 防御中
+   *   _appeared  … この戦闘で一度でも場に出た（勝ったときに愛情度が入る。控えには入らない）
    */
   BattleSystem.prototype._resetFieldMarks = function () {
     var i;
     for (i = 0; i < this.allies.length; i++) {
       this.allies[i]._removed = false;
       this.allies[i]._defending = false;
+      this.allies[i]._appeared = false;
     }
     for (i = 0; i < this.enemies.length; i++) {
       this.enemies[i]._removed = false;
@@ -102,6 +106,7 @@
     if (index < 0 || !incoming || this.slots.indexOf(incoming) >= 0) return false;
 
     this.slots[index] = incoming;
+    incoming._appeared = true;   // 交代で出たぶんも「場に出た」に数える
     return true;
   };
 
@@ -1270,6 +1275,7 @@
     if (!firstAlive(this.enemies)) {
       this.result = "win";
       this._awardExp(events);
+      this._awardAffection(events);
     } else {
       this.result = "lose";
     }
@@ -1348,6 +1354,38 @@
             skillName: skill ? skill.name : gained.learned[k]
           });
         }
+      }
+    }
+  };
+
+  /**
+   * 勝ったとき、この戦闘で一度でも場に出た仲間の愛情度を上げる（data/affection.js）。
+   * 控えには入らない。倒れていても、場に出ていれば数える。
+   * 段階が上がった仲間だけ、知らせの出来事を出す
+   */
+  BattleSystem.prototype._awardAffection = function (events) {
+    var amount = (this.data.affection || {}).gainPerWin || 0;
+    if (amount <= 0) return;
+
+    for (var i = 0; i < this.allies.length; i++) {
+      var ally = this.allies[i];
+      if (!ally._appeared || !ally.gainAffection) continue;
+
+      var result = ally.gainAffection(amount);
+      if (result.to <= result.from) continue;
+
+      var stage = ally.getAffectionStage();
+      events.push({
+        type: "affectionUp", actorName: ally.getName(), actor: ally,
+        stageIndex: result.to, stageName: stage ? stage.name : ""
+      });
+      for (var k = 0; k < result.learned.length; k++) {
+        var skill = this.data.getSkill(result.learned[k]);
+        events.push({
+          type: "skillLearned", actorName: ally.getName(),
+          skillId: result.learned[k],
+          skillName: skill ? skill.name : result.learned[k]
+        });
       }
     }
   };

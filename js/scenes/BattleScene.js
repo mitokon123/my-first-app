@@ -593,6 +593,12 @@
       case "skillLearned":
         this.game.discovery.markSkillLearned(event.skillId);
         break;
+      // 愛情度の段階が上がった。図鑑の記録は種族ごとなので、その種族の段階を残す
+      case "affectionUp":
+        if (event.actor && this.game.discovery.markAffectionStage) {
+          this.game.discovery.markAffectionStage(event.actor.speciesId, event.stageIndex);
+        }
+        break;
       // 初めてレベルが上がったときの説明。
       // ここで出すと、レベルアップの演出が出ている画面のまま読める。
       // update が説明を見つけると再生を止めるので、読み終わってから続きが動く

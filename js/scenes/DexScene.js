@@ -665,7 +665,31 @@
     lines.push({ text: "" });
     this._pushWrapped(lines, monster.description);
 
+    // 愛情度で書き足される記録。その種族でいちばん深まった段階までを出す
+    this._pushAffectionRecords(lines, monster, selected.value);
+
     return { sprite: monster.sprite, motion: monster.motion, lines: lines };
+  };
+
+  /**
+   * 愛情度の段階ごとに書き足される、主人公の記録（data/monsters.js の records）。
+   * 段階の id（used / trust / bond）をキーに書く。まだ書いていない段階は何も出さない。
+   * どこまで読めるかは、その種族でいちばん深まった段階（Discovery.getAffectionStage）
+   */
+  DexScene.prototype._pushAffectionRecords = function (lines, monster, speciesId) {
+    var records = monster.records || {};
+    var stages = (this.game.data.affection || {}).stages || [];
+    var reached = this.game.discovery.getAffectionStage
+      ? this.game.discovery.getAffectionStage(speciesId) : 0;
+
+    for (var i = 1; i <= reached && i < stages.length; i++) {
+      var text = records[stages[i].id];
+      if (!text) continue;
+      lines.push({ text: "" });
+      lines.push({ text: (this.texts.recordLabel || "― {stage} ―").replace("{stage}", stages[i].name),
+                   color: this.theme.cursorColor });
+      this._pushWrapped(lines, text);
+    }
   };
 
   /**

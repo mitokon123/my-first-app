@@ -42,7 +42,21 @@
  *     growthRate: 0.08
  *   オブジェクトで書くとステータスごとに指定できる（書かない項目は default を使う）：
  *     growthRate: { hp: 0.12, attack: 0.06, default: 0.08 }
- * description : 図鑑での説明文
+ * description : 図鑑での説明文。**主人公が書いた記録**として書く（ストーリー構成.md の 2）。
+ *   序盤の主人公はモンスターを恐れているので、警戒した事務的な書き方で揃える
+ *   （属性 → 見た目・生態 → 注意書き → 弱い属性）。
+ *   ★ いまの文章は作者が直したもの（α-9）。「魔物」とは書かず「モンスター」で統一する。
+ *   ★ 弱い属性は「主人公が知っている弱点」だけを書く。耐性の数値と全部は合わないが、わざと。
+ *     （雷は使えるモンスターが少なく、主人公がまだ試せていない。キングスライムなどに雷の弱点が無いのはそのため）
+ *     一覧は 早見表/図鑑説明文.txt。**このファイルとその表は必ず同じ文にしておくこと**
+ * records     : 愛情度の段階ごとに図鑑へ書き足される、主人公の記録（data/affection.js）。
+ *   { used: "慣れの文", trust: "信頼の文", bond: "絆の文" } の形。キーは段階の id。
+ *   その種族でいちばん深まった段階までが図鑑に出る。書いていない段階は何も出ない。
+ *   ★ まだどの種族にも書いていない（文章は作者が決める）
+ * bondReward  : 絆の段階で受け取る、その種族だけの報酬（書き方は data/affection.js の冒頭）。
+ *   全モンスターに専用技があるわけではない。専用技の無いモンスターは、能力・耐性が上がったり、既存の技を覚えたりする。
+ *     { skill: "技のid" } / { effects: [ … ] } / 両方
+ *   ★ まだどの種族にも決めていない。あとから書いても、もう絆に届いている仲間は次に読み込んだとき受け取る
  * baseHp/baseAttack/baseDefense/baseSpeed : 基本ステータス
  *   baseSpeed … 素早さ。大きいほど戦闘で先に行動する
  * basePp      : PPの基本値。技を使うと減る（通常攻撃はPPを使わない）
@@ -122,7 +136,7 @@
       // 上限99の3種のうちの1体。強さで抜けるのではなく、長く付き合える枠
       maxLevel: 99,
       growthRate: { hp: 0.16, attack: 0.16, defense: 0.18, speed: 0.13, pp: 0.10 },
-      description: "最も基本的なモンスター。素直で扱いやすい。",
+      description: "水属性。柔らかい体は打撃を吸い込み、傷もすぐに塞がる。見た目よりずっとしぶとい。動きは遅いが、人を襲う可能性はある。近づくときは注意すること。闇と雷に弱い。",
       baseHp: 22,
       baseAttack: 5,
       baseDefense: 4,
@@ -174,7 +188,7 @@
       maxLevel: 99,
       // ステータスごとに成長率を変える例：素早さだけ伸びやすい
       growthRate: { hp: 0.12, attack: 0.18, defense: 0.14, speed: 0.18, pp: 0.12 },
-      description: "暗がりを好む小さな獣。素早く飛び回る。",
+      description: "闇属性。暗がりを好み、素早く飛び回る。気づいたときには背後にいる。明かりを絶やさないこと。火に弱い。",
       baseHp: 16,
       baseAttack: 8,
       baseDefense: 2,
@@ -215,7 +229,7 @@
                       blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.14, attack: 0.16, defense: 0.15, speed: 0.15, pp: 0.10 },
-      description: "背中に苔を生やした小さなネズミ。坑道の壁を素早く走り回る。",
+      description: "地属性。背に苔を生やした小型の獣。坑道の壁を走り回り、足元から来る。小さいからと油断しないこと。火に弱い。",
       baseHp: 17,
       baseAttack: 7,
       baseDefense: 3,
@@ -251,7 +265,7 @@
                       blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.18, attack: 0.15, defense: 0.20, speed: 0.06, pp: 0.10 },
-      description: "岩そのものが動き出したような魔物。硬いが、とにかく足が遅い。",
+      description: "地属性。岩が動いているとしか思えない。硬く、攻撃が通りにくいが移動は遅い。水に弱い。",
       baseHp: 25,
       baseAttack: 6,
       baseDefense: 9,
@@ -296,7 +310,7 @@
       // 深層のヨミリュウへの答えを担うので、坑道の雑魚だが上限は高くしてある
       maxLevel: 80,
       growthRate: { hp: 0.14, attack: 0.16, defense: 0.16, speed: 0.18, pp: 0.15 },
-      description: "尾を光らせて飛ぶ虫。暗い坑道では道しるべにもなる。",
+      description: "光属性。尾を光らせて飛ぶ虫。暗い坑道では道しるべになるが、その光に別のモンスターが寄ってくるかもしれない。闇に弱い。",
       baseHp: 18,
       baseAttack: 8,
       baseDefense: 3,
@@ -338,7 +352,7 @@
                       blind: 0, curse: 0, instantDeath: 3 },
       maxLevel: 70,
       growthRate: { hp: 0.15, attack: 0.16, defense: 0.14, speed: 0.12, pp: 0.14 },
-      description: "坑道の湿った隅に生えるキノコの魔物。近づくと胞子を撒き散らす。",
+      description: "闇属性。坑道の湿った隅に生えるキノコのモンスター。近づくと胞子を撒く。光に弱い。",
       baseHp: 24,
       baseAttack: 9,
       baseDefense: 6,
@@ -381,7 +395,7 @@
       maxLevel: 50,
       // 守りとHPが伸び、足は止まったまま。ヒビイワ（構造体の在来種）の上位版という形
       growthRate: { hp: 0.17, attack: 0.14, defense: 0.19, speed: 0.07, pp: 0.10 },
-      description: "苔に覆われた石の巨人。坑道の奥で、長いあいだ眠っていた。",
+      description: "地属性。探索者の間では坑道の主と呼ばれている。苔に覆われた石の巨人で、坑道の奥で長く眠っていたらしい。一撃が重い。光に弱い。",
       // 基礎値は「仲間にしたとき」の強さ。在来種の最強格（ヒビイワ 28/8/11/3）と
       // 並ぶ程度に抑えてある。主として立ちはだかるときの強さは
       // data/bosses.js の statMultiplier で足す
@@ -427,7 +441,7 @@
       maxLevel: 50,
       // 攻めと速さが伸び、守りが置いていかれる。育てるほど「殴られる前に殴る」形になる
       growthRate: { hp: 0.16, attack: 0.19, defense: 0.11, speed: 0.17, pp: 0.13 },
-      description: "亀裂の底で眠っていた獣。たてがみが燃え、通る道すべてを焼いていく。",
+      description: "火属性。探索者の間では亀裂の主と呼ばれている。たてがみが燃えていて、通った跡はすべて焦げている。近づくだけで肌が焼ける。火の息には注意。水に弱い。",
       // 基礎値は「仲間にしたとき」の強さ。在来種より少し上、という程度に抑えてある。
       // 主として立ちはだかるときの強さは data/bosses.js の statMultiplier で足す
       baseHp: 35,
@@ -478,7 +492,7 @@
       // 立ちはだかるときの強さは data/bosses.js の statMultiplier で足す
       growthRate: { hp: 0.19, attack: 0.15, defense: 0.17, speed: 0.07, pp: 0.13 },
       basePp: 7,
-      description: "スライムたちの王。大きな体と王冠が特徴。",
+      description: "水属性。探索者の間では深層の主と呼ばれている。スライムたちの王で、頭に冠を載せている。体が大きく、体重を生かしたボディプレスは強力。闇に弱い。",
       // 基礎値は「仲間にしたとき」の強さ。在来種の目安（HP30/攻10/防12/速12）内に収めてある。
       // 以前は 60/12/8/5 だったので、仲間にするとLv1で在来種を大きく超えていた
       baseHp: 28,
@@ -527,7 +541,7 @@
       maxLevel: 70,
       // 素早さだけ突出させる。そのぶん打たれ弱い
       growthRate: { hp: 0.12, attack: 0.18, defense: 0.11, speed: 0.20, pp: 0.13 },
-      description: "灰をまとって舞う鳥。亀裂の熱に乗って昇っていく。体はひどく軽く、脆い。",
+      description: "風属性。灰をまとって舞う鳥。亀裂の熱に乗って、上から来る。体は軽く脆い。水に弱い。",
       baseHp: 14,
       baseAttack: 7,
       baseDefense: 3,
@@ -573,7 +587,7 @@
                       blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.16, attack: 0.15, defense: 0.18, speed: 0.08, pp: 0.10 },
-      description: "熱で焼けてひび割れた岩の魔物。守りは固いが、同じ石をぶつけられると脆い。",
+      description: "地属性。熱でひび割れた岩のモンスター。守りは固いが、同じ石をぶつけると割れる。地に弱い。",
       baseHp: 25,
       baseAttack: 8,
       baseDefense: 11,
@@ -614,7 +628,7 @@
                       blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 65,
       growthRate: { hp: 0.18, attack: 0.16, defense: 0.15, speed: 0.10, pp: 0.12 },
-      description: "マグマの中で暮らす大きなカニ。硬い殻をさらに固めて、じっと動かない。",
+      description: "火属性。マグマの中で暮らす中型のモンスター。殻を固めてじっと動かない。動かないからといって、背を向けないこと。水に弱い。",
       baseHp: 22,
       baseAttack: 10,
       baseDefense: 10,
@@ -660,7 +674,7 @@
                       blind: 0, curse: 2, instantDeath: 0 },
       maxLevel: 50,
       growthRate: { hp: 0.13, attack: 0.16, defense: 0.14, speed: 0.16, pp: 0.11 },
-      description: "燃えさしの炭が起き上がったもの。一体ずつは弱いが、群れで湧いてくる。",
+      description: "火属性。燃えさしの炭が起き上がったもの。一体ずつは弱いが、群れで湧く。水に弱い。",
       baseHp: 15,
       baseAttack: 7,
       baseDefense: 3,
@@ -702,7 +716,7 @@
       // 上限99の3種のうちの1体。序盤で捕まえても最後まで通用する
       maxLevel: 99,
       growthRate: { hp: 0.14, attack: 0.18, defense: 0.15, speed: 0.15, pp: 0.12 },
-      description: "体に炎をまとう獣。気性が荒く捕まえにくい。",
+      description: "火属性。体に炎をまとう獣。気性が荒く近づくと牙をむく。水に弱い。",
       baseHp: 19,
       baseAttack: 8,
       baseDefense: 5,
@@ -745,7 +759,7 @@
                       blind: 0, curse: 4, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.15, attack: 0.15, defense: 0.13, speed: 0.13, pp: 0.11 },
-      description: "底に溜まった闇が、ひとりでに形を持ったもの。一体では頼りないが、静かに数を増やす。",
+      description: "闇属性。底に溜まった闇が形を持ったもの。一体では頼りないが、群れで湧く。光に弱い。",
       baseHp: 18,
       baseAttack: 8,
       baseDefense: 5,
@@ -789,7 +803,7 @@
                       blind: 7, curse: 0, instantDeath: 0 },
       maxLevel: 60,
       growthRate: { hp: 0.17, attack: 0.12, defense: 0.16, speed: 0.11, pp: 0.13 },
-      description: "闇の底で根を張る蔦。獲物にからみついて、少しずつ力を吸い取る。",
+      description: "闇属性。闇の底で根を張る蔦。絡みつかれると、少しずつ力を吸われる。足元に注意すること。火に弱い。",
       baseHp: 23,
       baseAttack: 5,
       baseDefense: 7,
@@ -841,7 +855,7 @@
       // 仲間にする価値を持たせたいので、上限は高めにしてある
       maxLevel: 70,
       growthRate: { hp: 0.12, attack: 0.17, defense: 0.12, speed: 0.16, pp: 0.14 },
-      description: "小さな体に電気をためこんだ虫。触れると弾ける。",
+      description: "雷属性。小さな体に電気をためこんだ虫。触れると弾ける。素手で触らないこと。地に弱い。",
       baseHp: 16,
       baseAttack: 8,
       baseDefense: 4,
@@ -888,7 +902,7 @@
                       blind: 0, curse: 0, instantDeath: 0 },
       maxLevel: 70,
       growthRate: { hp: 0.18, attack: 0.16, defense: 0.14, speed: 0.08, pp: 0.14 },
-      description: "底の水が集まって形を取ったもの。近づいたものを、重い水塊で叩き潰す。",
+      description: "水属性。底の水が集まって形を取ったもの。重い水の塊で叩き潰してくる。水たまりに見えても踏まないこと。雷に弱い。",
       // 攻撃特化。壁役ではないので、HP・防御・PPは低く抑えてある。
       // 速さも捨ててあるので「先に殴られてから殴り返す」形になる
       baseHp: 16,
@@ -950,7 +964,7 @@
       maxLevel: 75,
       // 基礎値は在来種の目安内に収め、格は成長率の配分と耐性で出している
       growthRate: { hp: 0.16, attack: 0.17, defense: 0.16, speed: 0.12, pp: 0.14 },
-      description: "深層の底でとぐろを巻く竜。鱗は光を通さず、吐く息は闇そのものだという。",
+      description: "闇属性。揺籃の穴にいるはずのない竜。鱗は光を通さず吐く息は闇そのもの。勝てる相手とは思えない。見かけたら逃げること。光に弱い。",
       baseHp: 26,
       baseAttack: 12,
       baseDefense: 12,
@@ -1025,7 +1039,7 @@
                       blind: 2, curse: 6, instantDeath: 0 },
       maxLevel: 65,
       growthRate: { hp: 0.13, attack: 0.18, defense: 0.11, speed: 0.17, pp: 0.12 },
-      description: "毒沼の上を群れで飛ぶ蜂。刺されると傷そのものより、あとに残る毒が長く効く。",
+      description: "闇属性。毒沼の上を群れで飛ぶ蜂。刺された傷より、あとに残る毒のほうが長く効く。解毒草を持って入ること。光に弱い。",
       baseHp: 17,
       baseAttack: 8,
       baseDefense: 5,
@@ -1068,7 +1082,7 @@
                       blind: 5, curse: 0, instantDeath: 0 },
       maxLevel: 65,
       growthRate: { hp: 0.18, attack: 0.13, defense: 0.17, speed: 0.08, pp: 0.12 },
-      description: "沼底の泥をかぶった亀。甲羅に溜めた泥から、たえず毒の息を漏らしている。",
+      description: "地属性。沼底の泥をかぶった亀。甲羅に溜めた泥から、たえず毒の息を漏らしている。風下に立たないこと。雷に弱い。",
       baseHp: 25,
       baseAttack: 6,
       baseDefense: 10,
@@ -1110,7 +1124,7 @@
                       blind: 0, curse: 5, instantDeath: 10 },
       maxLevel: 70,
       growthRate: { hp: 0.16, attack: 0.15, defense: 0.13, speed: 0.13, pp: 0.15 },
-      description: "沼に沈んだ者の骨が、泥に浮いたまま動いている。眼窩の奥だけが青く光る。",
+      description: "闇属性。沼に沈んだ骨が、泥に浮いたまま動いている。眼窩の奥だけが青く光る。長く見ていたいものではない。光に弱い。",
       baseHp: 20,
       baseAttack: 11,
       baseDefense: 6,
@@ -1156,7 +1170,7 @@
                       blind: 0, curse: 0, instantDeath: 9 },
       maxLevel: 80,
       growthRate: { hp: 0.18, attack: 0.17, defense: 0.14, speed: 0.08, pp: 0.13 },
-      description: "沼の主。動かずに口だけを開けて待ち、近づいたものを丸ごと呑む。",
+      description: "水属性。探索者の間では沼の主と呼ばれている。動かずに口だけを開けて待ち、近づいたものを丸ごと呑む。間合いを測ってから近づくこと。雷に弱い。",
       baseHp: 30,
       baseAttack: 11,
       baseDefense: 8,
